@@ -141,6 +141,68 @@ CMD ["nginx", "-g", "daemon off;"]
 '''
     return dockerfile_content
 
+def build_image(dist_file_path, app_name, build_time, callback=None):
+    """仅构建Docker镜像"""
+    docker_cmd = find_docker_command()
+    if not docker_cmd:
+        error_msg = "❌ 错误: 未找到Docker命令，请确保Docker Desktop已安装并运行"
+        if callback:
+            callback(error_msg)
+        return False
+    
+    build_dir = Path(CONFIG['BUILD_FOLDER']) / f"{app_name}-{build_time}"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    
+    def log(message):
+        print(message)
+        if callback:
+            callback(message)
+    
+    try:
+        log(f"开始构建应用: {app_name} - {build_time}")
+        log(f"构建目录: {build_dir}")
+        
+        # 复制dist文件
+        log("复制dist文件...")
+        shutil.copy2(dist_file_path, build_dir / 'dist.zip')
+        
+        # 创建Dockerfile
+        log("创建Dockerfile...")
+        dockerfile_content = create_dockerfile(app_name, build_time)
+        with open(build_dir / 'Dockerfile', 'w', encoding='utf-8') as f:
+            f.write(dockerfile_content)
+        
+        # 构建镜像
+        image_tag = f"{app_name}:{build_time}"
+        
+        log(f"构建镜像: {image_tag}")
+        success, stdout, stderr = run_command(
+            f"{docker_cmd} build -t {image_tag} .", 
+            cwd=build_dir, 
+            callback=log if callback else None
+        )
+        
+        if not success:
+            log(f"构建失败: {stderr}")
+            return False
+        
+        log("✅ 构建成功!")
+        log(f"镜像标签: {image_tag}")
+        
+        return True
+        
+    except Exception as e:
+        log(f"构建过程出错: {str(e)}")
+        return False
+    finally:
+        # 清理构建目录
+        if build_dir.exists():
+            try:
+                shutil.rmtree(build_dir)
+                log(f"清理构建目录: {build_dir}")
+            except Exception as e:
+                log(f"清理构建目录失败: {e}")
+
 def build_and_push_image(app_name, version, dist_file_path, callback=None):
     """构建并推送Docker镜像"""
     # 首先检查Docker是否可用
@@ -235,15 +297,21 @@ class PublisherGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("HZXY WEB应用容器发布工具")
-        self.root.geometry("800x600")
+        self.root.geometry("1000x800")
         self.root.resizable(True, True)
         
         # 设置样式
         style = ttk.Style()
         style.theme_use('clam')
         
+        # 构建历史数据
+        self.builds = []  # 存储构建历史
+        self.builds_tree = None  # 构建列表树形控件
+        self.builds_file = os.path.expanduser("~/.hzxy-builds.json")
+        
         self.setup_ui()
         self.load_settings()
+        self.load_builds()
     
     def setup_ui(self):
         """设置UI界面"""
@@ -254,15 +322,21 @@ class PublisherGUI:
         # 配置网格权重
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
         
         # 标题
         title_label = ttk.Label(main_frame, text="🚀 HZXY WEB应用容器发布工具", font=('Arial', 16, 'bold'))
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 20))
         
+        # 左侧面板 - 配置和构建
+        left_panel = ttk.Frame(main_frame)
+        left_panel.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
+        left_panel.columnconfigure(0, weight=1)
+        
         # DockerHub配置
-        config_frame = ttk.LabelFrame(main_frame, text="DockerHub配置", padding="10")
-        config_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        config_frame = ttk.LabelFrame(left_panel, text="DockerHub配置", padding="10")
+        config_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         config_frame.columnconfigure(1, weight=1)
         
         ttk.Label(config_frame, text="用户名:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
@@ -276,56 +350,84 @@ class PublisherGUI:
         
         ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=2)
         
-        # 应用信息
-        app_frame = ttk.LabelFrame(main_frame, text="应用信息", padding="10")
-        app_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        app_frame.columnconfigure(1, weight=1)
+        # 新建构建
+        build_frame = ttk.LabelFrame(left_panel, text="新建构建", padding="10")
+        build_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        build_frame.columnconfigure(1, weight=1)
         
-        ttk.Label(app_frame, text="应用名称:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Label(build_frame, text="应用名称:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
         self.app_name_var = tk.StringVar()
-        app_entry = ttk.Entry(app_frame, textvariable=self.app_name_var)
+        app_entry = ttk.Entry(build_frame, textvariable=self.app_name_var)
         app_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
         app_entry.insert(0, "例如: ai-zhaoshang")
         app_entry.bind('<FocusIn>', lambda e: app_entry.delete(0, tk.END) if app_entry.get() == "例如: ai-zhaoshang" else None)
         
-        ttk.Label(app_frame, text="版本号:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
-        self.version_var = tk.StringVar()
-        version_entry = ttk.Entry(app_frame, textvariable=self.version_var)
-        version_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
-        version_entry.insert(0, "例如: v1.0.0")
-        version_entry.bind('<FocusIn>', lambda e: version_entry.delete(0, tk.END) if version_entry.get() == "例如: v1.0.0" else None)
-        
-        # 文件选择
-        file_frame = ttk.LabelFrame(main_frame, text="文件选择", padding="10")
-        file_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        file_frame.columnconfigure(1, weight=1)
-        
-        ttk.Label(file_frame, text="dist.zip文件:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Label(build_frame, text="dist.zip文件:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
         self.file_path_var = tk.StringVar()
-        ttk.Entry(file_frame, textvariable=self.file_path_var, state="readonly").grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
-        ttk.Button(file_frame, text="选择文件", command=self.select_file).grid(row=0, column=2)
+        ttk.Entry(build_frame, textvariable=self.file_path_var, state="readonly").grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        ttk.Button(build_frame, text="选择文件", command=self.select_file).grid(row=1, column=2, pady=(5, 0))
         
-        # 操作按钮
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=4, column=0, columnspan=2, pady=(0, 10))
+        self.build_btn = ttk.Button(build_frame, text="🔨 开始构建", command=self.start_build, style='Accent.TButton')
+        self.build_btn.grid(row=2, column=0, columnspan=3, pady=(10, 0))
         
-        self.publish_btn = ttk.Button(button_frame, text="🚀 构建并发布", command=self.start_publish, style='Accent.TButton')
-        self.publish_btn.pack(side=tk.LEFT, padx=(0, 10))
+        # 右侧面板 - 构建列表和日志
+        right_panel = ttk.Frame(main_frame)
+        right_panel.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
+        right_panel.columnconfigure(0, weight=1)
+        right_panel.rowconfigure(1, weight=1)
         
-        ttk.Button(button_frame, text="📋 生成docker-compose模板", command=self.generate_compose_template).pack(side=tk.LEFT)
+        # 构建历史列表
+        builds_frame = ttk.LabelFrame(right_panel, text="构建历史", padding="10")
+        builds_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        builds_frame.columnconfigure(0, weight=1)
+        builds_frame.rowconfigure(0, weight=1)
+        
+        # 创建Treeview
+        columns = ('app_name', 'build_time', 'status', 'actions')
+        self.builds_tree = ttk.Treeview(builds_frame, columns=columns, show='headings', height=8)
+        
+        # 设置列标题
+        self.builds_tree.heading('app_name', text='应用名称')
+        self.builds_tree.heading('build_time', text='构建时间')
+        self.builds_tree.heading('status', text='状态')
+        self.builds_tree.heading('actions', text='操作')
+        
+        # 设置列宽
+        self.builds_tree.column('app_name', width=120)
+        self.builds_tree.column('build_time', width=150)
+        self.builds_tree.column('status', width=80)
+        self.builds_tree.column('actions', width=200)
+        
+        self.builds_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 滚动条
+        builds_scrollbar = ttk.Scrollbar(builds_frame, orient=tk.VERTICAL, command=self.builds_tree.yview)
+        builds_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.builds_tree.configure(yscrollcommand=builds_scrollbar.set)
+        
+        # 操作按钮框架
+        actions_frame = ttk.Frame(builds_frame)
+        actions_frame.grid(row=1, column=0, columnspan=2, pady=(10, 0))
+        
+        ttk.Button(actions_frame, text="🧪 本地测试", command=self.test_selected_build).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(actions_frame, text="🚀 发布到DockerHub", command=self.publish_selected_build).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(actions_frame, text="📋 生成Compose模板", command=self.generate_compose_for_selected).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(actions_frame, text="🗑️ 删除构建", command=self.delete_selected_build).pack(side=tk.LEFT)
         
         # 日志输出
-        log_frame = ttk.LabelFrame(main_frame, text="构建日志", padding="10")
-        log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        log_frame = ttk.LabelFrame(right_panel, text="构建日志", padding="10")
+        log_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
-        main_frame.rowconfigure(5, weight=1)
         
         self.log_text = scrolledtext.ScrolledText(log_frame, height=15, state=tk.DISABLED)
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # 清空日志按钮
         ttk.Button(log_frame, text="清空日志", command=self.clear_log).grid(row=1, column=0, sticky=tk.E, pady=(5, 0))
+        
+        # 配置主面板权重
+        main_frame.rowconfigure(1, weight=1)
     
     def log_message(self, message):
         """添加日志消息"""
@@ -368,58 +470,313 @@ class PublisherGUI:
         else:
             self.token_var.set("")
     
-    def start_publish(self):
-        """开始发布（在新线程中）"""
+    def load_builds(self):
+        """加载构建历史"""
+        try:
+            if os.path.exists(self.builds_file):
+                with open(self.builds_file, 'r', encoding='utf-8') as f:
+                    self.builds = json.load(f)
+                self.refresh_builds_list()
+        except Exception as e:
+            self.log_message(f"加载构建历史失败: {e}")
+            self.builds = []
+    
+    def save_builds(self):
+        """保存构建历史"""
+        try:
+            with open(self.builds_file, 'w', encoding='utf-8') as f:
+                json.dump(self.builds, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log_message(f"保存构建历史失败: {e}")
+    
+    def refresh_builds_list(self):
+        """刷新构建列表显示"""
+        # 清空现有项目
+        for item in self.builds_tree.get_children():
+            self.builds_tree.delete(item)
+        
+        # 添加构建项目
+        for build in self.builds:
+            self.builds_tree.insert('', 'end', values=(
+                build['app_name'],
+                build['build_time'],
+                build['status'],
+                ''
+            ))
+    
+    def start_build(self):
+        """开始构建"""
         app_name = self.app_name_var.get().strip()
-        version = self.version_var.get().strip()
         file_path = self.file_path_var.get().strip()
         
-        if not all([app_name, version, file_path]):
-            messagebox.showerror("错误", "请填写所有必要信息")
+        if not app_name or app_name == "例如: ai-zhaoshang":
+            messagebox.showerror("错误", "请输入应用名称")
+            return
+        
+        if not file_path:
+            messagebox.showerror("错误", "请选择dist.zip文件")
             return
         
         if not os.path.exists(file_path):
-            messagebox.showerror("错误", "文件不存在")
+            messagebox.showerror("错误", "选择的文件不存在")
             return
         
-        if not CONFIG['DOCKERHUB_USERNAME'] or not CONFIG['DOCKERHUB_TOKEN']:
-            messagebox.showerror("错误", "请先配置DockerHub用户名和Token")
+        # 生成构建时间标签
+        build_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # 创建构建记录
+        build_record = {
+            'id': f"{app_name}_{build_time}",
+            'app_name': app_name,
+            'build_time': build_time,
+            'file_path': file_path,
+            'status': '构建中',
+            'docker_image': f"{app_name}:{build_time}",
+            'created_at': datetime.now().isoformat()
+        }
+        
+        self.builds.append(build_record)
+        self.save_builds()
+        self.refresh_builds_list()
+        
+        # 开始构建过程
+        self.build_btn.config(state='disabled')
+        threading.Thread(target=self._build_worker, args=(build_record,), daemon=True).start()
+    
+    def _build_worker(self, build_record):
+        """构建工作线程"""
+        try:
+            self.log_message(f"开始构建 {build_record['app_name']} - {build_record['build_time']}")
+            
+            # 调用构建函数
+            success = build_image(
+                build_record['file_path'],
+                build_record['app_name'],
+                build_record['build_time'],
+                self.log_message
+            )
+            
+            # 更新构建状态
+            if success:
+                build_record['status'] = '构建完成'
+                self.log_message(f"✅ 构建完成: {build_record['docker_image']}")
+            else:
+                build_record['status'] = '构建失败'
+                self.log_message(f"❌ 构建失败: {build_record['app_name']}")
+            
+            self.save_builds()
+            self.root.after(0, self.refresh_builds_list)
+            
+        except Exception as e:
+            build_record['status'] = '构建失败'
+            self.log_message(f"构建异常: {e}")
+            self.save_builds()
+            self.root.after(0, self.refresh_builds_list)
+        finally:
+            self.root.after(0, lambda: self.build_btn.config(state='normal'))
+    
+    def get_selected_build(self):
+        """获取选中的构建记录"""
+        selection = self.builds_tree.selection()
+        if not selection:
+            messagebox.showwarning("警告", "请先选择一个构建项目")
+            return None
+        
+        item = self.builds_tree.item(selection[0])
+        values = item['values']
+        app_name, build_time = values[0], values[1]
+        
+        # 查找对应的构建记录
+        for build in self.builds:
+            if build['app_name'] == app_name and build['build_time'] == build_time:
+                return build
+        
+        return None
+    
+    def test_selected_build(self):
+        """测试选中的构建"""
+        build = self.get_selected_build()
+        if not build:
             return
         
-        # 禁用按钮
-        self.publish_btn.config(state=tk.DISABLED, text="发布中...")
+        if build['status'] != '构建完成':
+            messagebox.showerror("错误", "只能测试构建完成的项目")
+            return
         
-        # 在新线程中执行
-        def publish_thread():
-            try:
-                success, message = build_and_push_image(app_name, version, file_path, self.log_message)
+        # 启动本地测试
+        threading.Thread(target=self._test_worker, args=(build,), daemon=True).start()
+    
+    def _test_worker(self, build):
+        """测试工作线程"""
+        try:
+            self.log_message(f"开始本地测试: {build['docker_image']}")
+            
+            # 停止可能存在的同名容器
+            docker_cmd = find_docker_command()
+            if not docker_cmd:
+                self.log_message("❌ 未找到Docker命令")
+                return
+            
+            container_name = f"test_{build['app_name']}_{build['build_time']}"
+            
+            # 停止并删除现有容器
+            subprocess.run([docker_cmd, 'stop', container_name], capture_output=True)
+            subprocess.run([docker_cmd, 'rm', container_name], capture_output=True)
+            
+            # 启动新容器
+            cmd = [
+                docker_cmd, 'run', '-d',
+                '--name', container_name,
+                '-p', '3000:80',
+                build['docker_image']
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                self.log_message(f"✅ 测试容器启动成功: {container_name}")
+                self.log_message(f"🌐 访问地址: http://localhost:3000")
+                self.log_message(f"💡 停止测试: docker stop {container_name}")
+            else:
+                self.log_message(f"❌ 测试容器启动失败: {result.stderr}")
                 
-                # 在主线程中更新UI
-                self.root.after(0, lambda: self.publish_complete(success, message))
-            except Exception as e:
-                self.root.after(0, lambda: self.publish_complete(False, str(e)))
-        
-        threading.Thread(target=publish_thread, daemon=True).start()
+        except Exception as e:
+            self.log_message(f"测试异常: {e}")
     
-    def publish_complete(self, success, message):
-        """发布完成回调"""
-        self.publish_btn.config(state=tk.NORMAL, text="🚀 构建并发布")
-        
-        if success:
-            messagebox.showinfo("成功", message)
-        else:
-            messagebox.showerror("失败", message)
-    
-    def generate_compose_template(self):
-        """生成docker-compose模板"""
-        app_name = self.app_name_var.get().strip()
-        if not app_name:
-            messagebox.showerror("错误", "请先输入应用名称")
+    def publish_selected_build(self):
+        """发布选中的构建"""
+        build = self.get_selected_build()
+        if not build:
             return
+        
+        if build['status'] != '构建完成':
+            messagebox.showerror("错误", "只能发布构建完成的项目")
+            return
+        
+        # 弹出版本号输入对话框
+        self._show_publish_dialog(build)
+    
+    def _show_publish_dialog(self, build):
+        """显示发布对话框"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("发布到DockerHub")
+        dialog.geometry("400x200")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        frame = ttk.Frame(dialog, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text=f"应用: {build['app_name']}").pack(pady=(0, 10))
+        ttk.Label(frame, text=f"构建时间: {build['build_time']}").pack(pady=(0, 10))
+        
+        ttk.Label(frame, text="发布版本号:").pack(pady=(0, 5))
+        version_var = tk.StringVar()
+        
+        # 自动推荐版本号
+        recommended_version = self._get_recommended_version(build['app_name'])
+        version_var.set(recommended_version)
+        
+        version_entry = ttk.Entry(frame, textvariable=version_var, width=30)
+        version_entry.pack(pady=(0, 10))
+        version_entry.select_range(0, tk.END)
+        version_entry.focus()
+        
+        ttk.Label(frame, text=f"推荐版本: {recommended_version}", foreground="gray").pack(pady=(0, 10))
+        
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(pady=(10, 0))
+        
+        def on_publish():
+            version = version_var.get().strip()
+            if not version:
+                messagebox.showerror("错误", "请输入版本号")
+                return
+            
+            dialog.destroy()
+            threading.Thread(target=self._publish_worker, args=(build, version), daemon=True).start()
+        
+        ttk.Button(button_frame, text="发布", command=on_publish).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT)
+    
+    def _get_recommended_version(self, app_name):
+        """获取推荐的版本号"""
+        # 查找该应用的历史版本
+        versions = []
+        for build in self.builds:
+            if build['app_name'] == app_name and 'published_version' in build:
+                versions.append(build['published_version'])
+        
+        if not versions:
+            return "v1.0.0"
+        
+        # 解析版本号并自增
+        try:
+            latest_version = max(versions, key=lambda v: [int(x) for x in v.replace('v', '').split('.')])
+            parts = latest_version.replace('v', '').split('.')
+            parts[-1] = str(int(parts[-1]) + 1)
+            return f"v{'.'.join(parts)}"
+        except:
+            return "v1.0.0"
+    
+    def _publish_worker(self, build, version):
+        """发布工作线程"""
+        try:
+            self.log_message(f"开始发布: {build['app_name']} -> {version}")
+            
+            username = self.username_var.get().strip()
+            token = self.token_var.get().strip()
+            
+            if not username or not token:
+                self.log_message("❌ 请先配置DockerHub用户名和Token")
+                return
+            
+            # 调用发布函数
+            success, message = build_and_push_image(
+                build['app_name'],
+                version,
+                build['file_path'],
+                self.log_message
+            )
+            
+            if success:
+                build['published_version'] = version
+                build['published_at'] = datetime.now().isoformat()
+                self.save_builds()
+                self.log_message(f"✅ 发布成功: {username}/{build['app_name']}:{version}")
+            else:
+                self.log_message(f"❌ 发布失败: {message}")
+                
+        except Exception as e:
+            self.log_message(f"发布异常: {e}")
+    
+    def generate_compose_for_selected(self):
+        """为选中的构建生成docker-compose模板"""
+        build = self.get_selected_build()
+        if not build:
+            return
+        
+        if 'published_version' not in build:
+            messagebox.showerror("错误", "请先发布该构建到DockerHub")
+            return
+        
+        username = self.username_var.get().strip()
+        if not username:
+            messagebox.showerror("错误", "请先配置DockerHub用户名")
+            return
+        
+        app_name = build['app_name']
+        version = build['published_version']
         
         template = f'''services:
   hzxy-{app_name}:
-    image: {CONFIG['DOCKERHUB_USERNAME'] or 'your_dockerhub_username'}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:latest
+    image: {username}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:{version}
     container_name: hzxy-{app_name}
     ports:
       - "3000:80"
@@ -448,6 +805,20 @@ networks:
                 messagebox.showinfo("成功", f"模板已保存到: {file_path}")
             except Exception as e:
                 messagebox.showerror("错误", f"保存失败: {e}")
+    
+    def delete_selected_build(self):
+        """删除选中的构建"""
+        build = self.get_selected_build()
+        if not build:
+            return
+        
+        if messagebox.askyesno("确认删除", f"确定要删除构建 {build['app_name']} - {build['build_time']} 吗？"):
+            self.builds.remove(build)
+            self.save_builds()
+            self.refresh_builds_list()
+            self.log_message(f"已删除构建: {build['app_name']} - {build['build_time']}")
+    
+
     
     def run(self):
         """运行GUI"""
