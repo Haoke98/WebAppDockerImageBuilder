@@ -54,6 +54,7 @@ def save_config():
     try:
         config_to_save = {
             'DOCKERHUB_USERNAME': CONFIG['DOCKERHUB_USERNAME'],
+            'DOCKERHUB_TOKEN': CONFIG['DOCKERHUB_TOKEN'],
             'BASE_IMAGE_NAME': CONFIG['BASE_IMAGE_NAME']
         }
         with open(CONFIG['CONFIG_FILE'], 'w', encoding='utf-8') as f:
@@ -361,9 +362,11 @@ class PublisherGUI:
         """加载设置"""
         load_config()
         self.username_var.set(CONFIG['DOCKERHUB_USERNAME'])
-        # Token不显示，但会从环境变量或配置文件加载
+        # Token不显示明文，但保留实际值
         if CONFIG['DOCKERHUB_TOKEN']:
-            self.token_var.set("已设置")
+            self.token_var.set(CONFIG['DOCKERHUB_TOKEN'])  # 保留实际token值
+        else:
+            self.token_var.set("")
     
     def start_publish(self):
         """开始发布（在新线程中）"""
