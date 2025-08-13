@@ -1,0 +1,9 @@
+[
+  {
+    "app_name": "ai-invest",
+    "build_time": "20250813_153713",
+    "status": "构建完成",
+    "docker_image": "ai-invest:20250813_153713",
+    "dist_file": "ai-invest-dist.zip"
+  }
+]

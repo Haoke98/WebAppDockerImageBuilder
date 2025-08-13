@@ -476,10 +476,13 @@ class PublisherGUI:
             if os.path.exists(self.builds_file):
                 with open(self.builds_file, 'r', encoding='utf-8') as f:
                     self.builds = json.load(f)
-                self.refresh_builds_list()
+            else:
+                self.builds = []
+            self.refresh_builds_list()
         except Exception as e:
             self.log_message(f"加载构建历史失败: {e}")
             self.builds = []
+            self.refresh_builds_list()
     
     def save_builds(self):
         """保存构建历史"""
@@ -496,6 +499,7 @@ class PublisherGUI:
             self.builds_tree.delete(item)
         
         # 添加构建项目
+        self.log_message(f"加载构建历史: 共{len(self.builds)}个构建记录")
         for build in self.builds:
             self.builds_tree.insert('', 'end', values=(
                 build['app_name'],
@@ -503,6 +507,7 @@ class PublisherGUI:
                 build['status'],
                 ''
             ))
+            self.log_message(f"添加构建记录: {build['app_name']} - {build['build_time']}")
     
     def start_build(self):
         """开始构建"""
@@ -578,6 +583,7 @@ class PublisherGUI:
     def get_selected_build(self):
         """获取选中的构建记录"""
         selection = self.builds_tree.selection()
+        self.log_message(f"当前选中项: {selection}")
         if not selection:
             messagebox.showwarning("警告", "请先选择一个构建项目")
             return None
@@ -586,15 +592,31 @@ class PublisherGUI:
         values = item['values']
         app_name, build_time = values[0], values[1]
         
+        # 确保build_time是字符串类型
+        build_time = str(build_time)
+        self.log_message(f"选中的构建: '{app_name}' - '{build_time}' (类型: {type(build_time)})")
+        
         # 查找对应的构建记录
         for build in self.builds:
-            if build['app_name'] == app_name and build['build_time'] == build_time:
+            self.log_message(f"比较构建记录: '{build['app_name']}' - '{build['build_time']}' (类型: {type(build['build_time'])})")
+            
+            # 处理时间格式差异：移除下划线进行比较
+            stored_time = build['build_time'].replace('_', '')
+            selected_time = build_time.replace('_', '')
+            
+            self.log_message(f"格式化后比较: '{stored_time}' vs '{selected_time}'")
+            self.log_message(f"app_name匹配: {build['app_name'] == app_name}, build_time匹配: {stored_time == selected_time}")
+            
+            if build['app_name'] == app_name and stored_time == selected_time:
+                self.log_message(f"找到匹配的构建记录: {build}")
                 return build
         
+        self.log_message("未找到匹配的构建记录")
         return None
     
     def test_selected_build(self):
         """测试选中的构建"""
+        self.log_message("🧪 本地测试按钮被点击")
         build = self.get_selected_build()
         if not build:
             return
@@ -645,6 +667,7 @@ class PublisherGUI:
     
     def publish_selected_build(self):
         """发布选中的构建"""
+        self.log_message("🚀 发布按钮被点击")
         build = self.get_selected_build()
         if not build:
             return
@@ -758,6 +781,7 @@ class PublisherGUI:
     
     def generate_compose_for_selected(self):
         """为选中的构建生成docker-compose模板"""
+        self.log_message("📋 生成Compose模板按钮被点击")
         build = self.get_selected_build()
         if not build:
             return
@@ -808,6 +832,7 @@ networks:
     
     def delete_selected_build(self):
         """删除选中的构建"""
+        self.log_message("🗑️ 删除构建按钮被点击")
         build = self.get_selected_build()
         if not build:
             return
