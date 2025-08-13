@@ -308,6 +308,8 @@ class PublisherGUI:
         self.builds = []  # 存储构建历史
         self.builds_tree = None  # 构建列表树形控件
         self.builds_file = os.path.expanduser("~/.hzxy-builds.json")
+        self.structure_tree = None  # 目录结构树形控件
+        self.log_text = None  # 日志文本控件
         
         self.setup_ui()
         self.load_settings()
@@ -370,6 +372,24 @@ class PublisherGUI:
         self.build_btn = ttk.Button(build_frame, text="🔨 开始构建", command=self.start_build, style='Accent.TButton')
         self.build_btn.grid(row=2, column=0, columnspan=3, pady=(10, 0))
         
+        # 目录结构展示
+        structure_frame = ttk.LabelFrame(left_panel, text="应用目录结构", padding="10")
+        structure_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        structure_frame.columnconfigure(0, weight=1)
+        structure_frame.rowconfigure(0, weight=1)
+        
+        # 创建目录结构树形控件
+        self.structure_tree = ttk.Treeview(structure_frame, height=10)
+        self.structure_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 滚动条
+        structure_scrollbar = ttk.Scrollbar(structure_frame, orient=tk.VERTICAL, command=self.structure_tree.yview)
+        structure_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.structure_tree.configure(yscrollcommand=structure_scrollbar.set)
+        
+        # 配置左侧面板权重
+        left_panel.rowconfigure(2, weight=1)
+        
         # 右侧面板 - 构建列表和日志
         right_panel = ttk.Frame(main_frame)
         right_panel.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -429,8 +449,132 @@ class PublisherGUI:
         # 配置主面板权重
         main_frame.rowconfigure(1, weight=1)
     
+    def show_zip_structure(self, zip_path):
+        """显示zip文件的目录结构"""
+        if not self.structure_tree:
+            return
+            
+        try:
+            # 清空现有内容
+            for item in self.structure_tree.get_children():
+                self.structure_tree.delete(item)
+            
+            # 读取zip文件内容
+            with zipfile.ZipFile(zip_path, 'r') as zip_file:
+                file_list = zip_file.namelist()
+                
+                # 构建树形结构
+                nodes = {}
+                
+                for file_path in sorted(file_list):
+                    parts = file_path.split('/')
+                    current_path = ''
+                    
+                    for i, part in enumerate(parts):
+                        if not part:  # 跳过空字符串
+                            continue
+                            
+                        parent_path = current_path
+                        current_path = '/'.join(parts[:i+1]) if current_path else part
+                        
+                        if current_path not in nodes:
+                            if parent_path and parent_path in nodes:
+                                parent_id = nodes[parent_path]
+                            else:
+                                parent_id = ''
+                            
+                            # 判断是文件还是目录
+                            is_dir = file_path.endswith('/') or i < len(parts) - 1
+                            icon = '📁' if is_dir else '📄'
+                            
+                            node_id = self.structure_tree.insert(
+                                parent_id, 'end', 
+                                text=f"{icon} {part}",
+                                open=True if i < 2 else False  # 前两层默认展开
+                            )
+                            nodes[current_path] = node_id
+                
+                self.log_message(f"已显示zip文件结构: {len(file_list)}个文件")
+                
+        except Exception as e:
+            self.log_message(f"读取zip文件失败: {e}")            
+            # 显示错误信息
+            self.structure_tree.insert('', 'end', text=f"❌ 读取失败: {str(e)}")
+    
+    def show_zip_structure(self, zip_path):
+        """显示zip文件的目录结构"""
+        if not self.structure_tree:
+            return
+            
+        try:
+            # 清空现有内容
+            for item in self.structure_tree.get_children():
+                self.structure_tree.delete(item)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_file:
+                file_list = zip_file.namelist()
+                
+                # 构建树形结构
+                nodes = {}  # 存储已创建的节点
+                
+                for file_path in sorted(file_list):
+                    if file_path.endswith('/'):
+                        continue  # 跳过目录条目
+                    
+                    parts = file_path.split('/')
+                    current_path = ''
+                    parent_id = ''
+                    
+                    for i, part in enumerate(parts):
+                        if not part:  # 跳过空部分
+                            continue
+                            
+                        current_path = '/'.join(parts[:i+1]) if current_path else part
+                        
+                        if current_path not in nodes:
+                            # 判断是否为目录
+                            is_dir = file_path.endswith('/') or i < len(parts) - 1
+                            icon = '📁' if is_dir else '📄'
+                            
+                            node_id = self.structure_tree.insert(
+                                parent_id, 'end', 
+                                text=f"{icon} {part}",
+                                open=True if i < 2 else False  # 前两层默认展开
+                            )
+                            nodes[current_path] = node_id
+                
+                self.log_message(f"已显示zip文件结构: {len(file_list)}个文件")
+                
+        except Exception as e:
+            self.log_message(f"读取zip文件失败: {e}")            
+            # 显示错误信息
+            self.structure_tree.insert('', 'end', text=f"❌ 读取失败: {str(e)}")
+    
+    def show_build_structure(self, build):
+        """显示构建的目录结构"""
+        if not self.structure_tree:
+            return
+            
+        try:
+            # 清空现有内容
+            for item in self.structure_tree.get_children():
+                self.structure_tree.delete(item)
+            
+            if 'file_path' in build and os.path.exists(build['file_path']):
+                self.show_zip_structure(build['file_path'])
+            else:
+                self.structure_tree.insert('', 'end', text="❌ 源文件不存在")
+                
+        except Exception as e:
+            self.log_message(f"显示构建结构失败: {e}")
+            self.structure_tree.insert('', 'end', text=f"❌ 显示失败: {str(e)}")
+    
     def log_message(self, message):
         """添加日志消息"""
+        if not self.log_text:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+            return
+            
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
         self.log_text.see(tk.END)
@@ -451,6 +595,8 @@ class PublisherGUI:
         )
         if file_path:
             self.file_path_var.set(file_path)
+            # 显示zip文件内容
+            self.show_zip_structure(file_path)
     
     def save_settings(self):
         """保存设置"""
@@ -494,6 +640,9 @@ class PublisherGUI:
     
     def refresh_builds_list(self):
         """刷新构建列表显示"""
+        if not self.builds_tree:
+            return
+            
         # 清空现有项目
         for item in self.builds_tree.get_children():
             self.builds_tree.delete(item)
@@ -508,6 +657,9 @@ class PublisherGUI:
                 ''
             ))
             self.log_message(f"添加构建记录: {build['app_name']} - {build['build_time']}")
+        
+        # 绑定选择事件
+        self.builds_tree.bind('<<TreeviewSelect>>', self.on_build_select)
     
     def start_build(self):
         """开始构建"""
@@ -842,6 +994,12 @@ networks:
             self.save_builds()
             self.refresh_builds_list()
             self.log_message(f"已删除构建: {build['app_name']} - {build['build_time']}")
+    
+    def on_build_select(self, event):
+        """构建选择事件处理"""
+        build = self.get_selected_build()
+        if build:
+            self.show_build_structure(build)
     
 
     
