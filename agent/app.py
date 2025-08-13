@@ -121,10 +121,14 @@ RUN rm -rf /usr/share/nginx/html/*
 # 复制应用文件
 COPY dist.zip /tmp/dist.zip
 
-# 解压应用文件
+# 解压应用文件并保持目录结构
 RUN cd /tmp && unzip dist.zip && \
-    if [ -d "dist" ]; then cp -r dist/* /usr/share/nginx/html/; \
-    else cp -r * /usr/share/nginx/html/; fi && \
+    if [ -d "dist" ]; then \
+        cp -r dist/* /usr/share/nginx/html/; \
+    else \
+        cp -r . /usr/share/nginx/html/ && \
+        rm -f /usr/share/nginx/html/dist.zip; \
+    fi && \
     rm -rf /tmp/dist.zip /tmp/dist
 
 # 添加标签
@@ -997,9 +1001,36 @@ networks:
     
     def on_build_select(self, event):
         """构建选择事件处理"""
-        build = self.get_selected_build()
-        if build:
-            self.show_build_structure(build)
+        selection = self.builds_tree.selection()
+        self.log_message(f"当前选中项: {selection}")
+        if not selection:
+            return
+        
+        item = self.builds_tree.item(selection[0])
+        values = item['values']
+        app_name, build_time = values[0], values[1]
+        
+        # 确保build_time是字符串类型
+        build_time = str(build_time)
+        self.log_message(f"选中的构建: '{app_name}' - '{build_time}' (类型: {type(build_time)})")
+        
+        # 查找对应的构建记录
+        for build in self.builds:
+            self.log_message(f"比较构建记录: '{build['app_name']}' - '{build['build_time']}' (类型: {type(build['build_time'])})")
+            
+            # 处理时间格式差异：移除下划线进行比较
+            stored_time = build['build_time'].replace('_', '')
+            selected_time = build_time.replace('_', '')
+            
+            self.log_message(f"格式化后比较: '{stored_time}' vs '{selected_time}'")
+            self.log_message(f"app_name匹配: {build['app_name'] == app_name}, build_time匹配: {stored_time == selected_time}")
+            
+            if build['app_name'] == app_name and stored_time == selected_time:
+                self.log_message(f"找到匹配的构建记录: {build}")
+                self.show_build_structure(build)
+                return
+        
+        self.log_message("未找到匹配的构建记录")
     
 
     
