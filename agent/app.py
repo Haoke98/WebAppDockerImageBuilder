@@ -6,6 +6,7 @@ HZXY WEB应用容器发布Agent
 支持GUI界面和命令行两种使用方式
 """
 
+from math import log
 import os
 import sys
 import json
@@ -14,6 +15,7 @@ import zipfile
 import tempfile
 import subprocess
 import threading
+import socket
 from datetime import datetime
 from pathlib import Path
 import click
@@ -82,13 +84,54 @@ def find_docker_command():
     
     return None
 
-def run_command(cmd, cwd=None, callback=None):
+def get_available_port(start_port=3000):
+    """获取可用端口"""
+    for port in range(start_port, start_port + 100):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', port))
+                return port
+        except OSError:
+            continue
+    return None
+
+def get_container_status(container_name):
+    """获取容器状态"""
+    docker_cmd = find_docker_command()
+    if not docker_cmd:
+        return None
+    
+    try:
+        # 检查容器是否存在并获取状态
+        result = subprocess.run([
+            docker_cmd, 'ps', '-a', '--filter', f'name={container_name}', 
+            '--format', 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+        ], capture_output=True, text=True)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            lines = result.stdout.strip().split('\n')
+            if len(lines) > 1:  # 跳过表头
+                parts = lines[1].split('\t')
+                if len(parts) >= 2:
+                    status = parts[1]
+                    ports = parts[2] if len(parts) > 2 else ''
+                    return {
+                        'running': 'Up' in status,
+                        'status': status,
+                        'ports': ports
+                    }
+    except Exception:
+        pass
+    
+    return None
+
+def run_command(cmd, cwd=None, callback=None, env=None):
     """执行命令并返回结果"""
     try:
         if callback:
             # 实时输出模式
             process = subprocess.Popen(
-                cmd, shell=True, cwd=cwd, 
+                cmd, shell=True, cwd=cwd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 universal_newlines=True, bufsize=1
             )
@@ -103,14 +146,15 @@ def run_command(cmd, cwd=None, callback=None):
             return process.returncode == 0, '\n'.join(output_lines), ''
         else:
             # 普通模式
-            result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+            result = subprocess.run(cmd, shell=True, cwd=cwd, env=env, capture_output=True, text=True)
             return result.returncode == 0, result.stdout, result.stderr
     except Exception as e:
         return False, '', str(e)
 
 def create_dockerfile(app_name, version):
     """创建Dockerfile"""
-    dockerfile_content = f'''FROM nginx:alpine
+    dockerfile_content = f'''
+FROM nginx:alpine
 
 # 设置工作目录
 WORKDIR /usr/share/nginx/html
@@ -207,12 +251,22 @@ def build_image(dist_file_path, app_name, build_time, callback=None):
             except Exception as e:
                 log(f"清理构建目录失败: {e}")
 
-def build_and_push_image(app_name, version, dist_file_path, callback=None):
+def build_and_push_image(app_name, version, dist_file_path, username=None, token=None, callback=None):
     """构建并推送Docker镜像"""
     # 首先检查Docker是否可用
     docker_cmd = find_docker_command()
     if not docker_cmd:
         error_msg = "❌ 错误: 未找到Docker命令，请确保Docker Desktop已安装并运行"
+        if callback:
+            callback(error_msg)
+        return False, error_msg
+    
+    # 使用传入的用户名和token，如果没有则使用CONFIG中的
+    dockerhub_username = username or CONFIG['DOCKERHUB_USERNAME']
+    dockerhub_token = token or CONFIG['DOCKERHUB_TOKEN']
+    
+    if not dockerhub_username or not dockerhub_token:
+        error_msg = "❌ 错误: 缺少DockerHub用户名或Token"
         if callback:
             callback(error_msg)
         return False, error_msg
@@ -239,8 +293,8 @@ def build_and_push_image(app_name, version, dist_file_path, callback=None):
             f.write(dockerfile_content)
         
         # 构建镜像
-        image_tag = f"{CONFIG['DOCKERHUB_USERNAME']}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:{version}"
-        latest_tag = f"{CONFIG['DOCKERHUB_USERNAME']}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:latest"
+        image_tag = f"{dockerhub_username}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:{version}"
+        latest_tag = f"{dockerhub_username}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:latest"
         
         log(f"构建镜像: {image_tag}")
         success, stdout, stderr = run_command(
@@ -253,18 +307,36 @@ def build_and_push_image(app_name, version, dist_file_path, callback=None):
             return False, f"构建失败: {stderr}"
         
         # 登录DockerHub
-        if CONFIG['DOCKERHUB_TOKEN']:
+        if dockerhub_token:
             log("登录DockerHub...")
-            success, _, stderr = run_command(
-                f"echo {CONFIG['DOCKERHUB_TOKEN']} | {docker_cmd} login -u {CONFIG['DOCKERHUB_USERNAME']} --password-stdin"
-            )
+            # 使用临时配置禁用凭据存储
+            login_cmd = f"echo '{dockerhub_token}' | {docker_cmd} login -u {dockerhub_username} --password-stdin"
+            
+            # 设置环境变量禁用凭据存储
+            import os
+            env = os.environ.copy()
+            env['DOCKER_CONFIG'] = '/tmp/.docker'
+            
+            # 创建临时Docker配置目录
+            temp_docker_dir = Path('/tmp/.docker')
+            temp_docker_dir.mkdir(exist_ok=True)
+            
+            # 创建config.json禁用凭据存储
+            config_content = '{"credsStore": ""}'
+            with open(temp_docker_dir / 'config.json', 'w') as f:
+                f.write(config_content)
+            
+            success, _, stderr = run_command(login_cmd, env=env)
             if not success:
                 return False, f"DockerHub登录失败: {stderr}"
         
-        # 推送镜像
+        # 推送镜像（使用相同的环境变量）
+        push_env = env if dockerhub_token else None
+        
         log(f"推送镜像: {image_tag}")
         success, stdout, stderr = run_command(
             f"{docker_cmd} push {image_tag}", 
+            env=push_env,
             callback=log if callback else None
         )
         if not success:
@@ -273,6 +345,7 @@ def build_and_push_image(app_name, version, dist_file_path, callback=None):
         log(f"推送镜像: {latest_tag}")
         success, stdout, stderr = run_command(
             f"{docker_cmd} push {latest_tag}", 
+            env=push_env,
             callback=log if callback else None
         )
         if not success:
@@ -313,7 +386,7 @@ class PublisherGUI:
         self.builds_tree = None  # 构建列表树形控件
         self.builds_file = os.path.expanduser("~/.hzxy-builds.json")
         self.structure_tree = None  # 目录结构树形控件
-        self.log_text = None  # 日志文本控件
+        self.log_text = False  # 日志文本控件
         
         self.setup_ui()
         self.load_settings()
@@ -407,20 +480,22 @@ class PublisherGUI:
         builds_frame.rowconfigure(0, weight=1)
         
         # 创建Treeview
-        columns = ('app_name', 'build_time', 'status', 'actions')
+        columns = ('app_name', 'build_time', 'status', 'container_status', 'test_url')
         self.builds_tree = ttk.Treeview(builds_frame, columns=columns, show='headings', height=8)
         
         # 设置列标题
         self.builds_tree.heading('app_name', text='应用名称')
         self.builds_tree.heading('build_time', text='构建时间')
-        self.builds_tree.heading('status', text='状态')
-        self.builds_tree.heading('actions', text='操作')
+        self.builds_tree.heading('status', text='构建状态')
+        self.builds_tree.heading('container_status', text='容器状态')
+        self.builds_tree.heading('test_url', text='访问地址')
         
         # 设置列宽
         self.builds_tree.column('app_name', width=120)
         self.builds_tree.column('build_time', width=150)
         self.builds_tree.column('status', width=80)
-        self.builds_tree.column('actions', width=200)
+        self.builds_tree.column('container_status', width=100)
+        self.builds_tree.column('test_url', width=150)
         
         self.builds_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
@@ -429,11 +504,16 @@ class PublisherGUI:
         builds_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         self.builds_tree.configure(yscrollcommand=builds_scrollbar.set)
         
+
+        # 绑定双击事件打开访问地址
+        self.builds_tree.bind('<Double-1>', self.on_build_double_click)
+        
         # 操作按钮框架
         actions_frame = ttk.Frame(builds_frame)
         actions_frame.grid(row=1, column=0, columnspan=2, pady=(10, 0))
         
         ttk.Button(actions_frame, text="🧪 本地测试", command=self.test_selected_build).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(actions_frame, text="⏹️ 停止容器", command=self.stop_selected_container).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(actions_frame, text="🚀 发布到DockerHub", command=self.publish_selected_build).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(actions_frame, text="📋 生成Compose模板", command=self.generate_compose_for_selected).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(actions_frame, text="🗑️ 删除构建", command=self.delete_selected_build).pack(side=tk.LEFT)
@@ -575,6 +655,7 @@ class PublisherGUI:
     
     def log_message(self, message):
         """添加日志消息"""
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
         if not self.log_text:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
             return
@@ -654,11 +735,26 @@ class PublisherGUI:
         # 添加构建项目
         self.log_message(f"加载构建历史: 共{len(self.builds)}个构建记录")
         for build in self.builds:
+            # 检查容器状态
+            container_status = "未运行"
+            test_url = ""
+            
+            if 'container_name' in build:
+                status = get_container_status(build['container_name'])
+                if status and status.get('running'):
+                    container_status = "运行中"
+                    test_url = build.get('test_url', '')
+                elif status and not status.get('running'):
+                    container_status = "已停止"
+                else:
+                    container_status = "未运行"
+            
             self.builds_tree.insert('', 'end', values=(
                 build['app_name'],
                 build['build_time'],
                 build['status'],
-                ''
+                container_status,
+                test_url
             ))
             self.log_message(f"添加构建记录: {build['app_name']} - {build['build_time']}")
         
@@ -794,27 +890,42 @@ class PublisherGUI:
             if not docker_cmd:
                 self.log_message("❌ 未找到Docker命令")
                 return
-            
+
             container_name = f"test_{build['app_name']}_{build['build_time']}"
             
             # 停止并删除现有容器
             subprocess.run([docker_cmd, 'stop', container_name], capture_output=True)
             subprocess.run([docker_cmd, 'rm', container_name], capture_output=True)
             
+            # 获取可用端口
+            port = get_available_port()
+            if not port:
+                self.log_message("❌ 无法找到可用端口")
+                return
+            
             # 启动新容器
             cmd = [
                 docker_cmd, 'run', '-d',
                 '--name', container_name,
-                '-p', '3000:80',
+                '-p', f'{port}:80',
                 build['docker_image']
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode == 0:
+                # 保存容器信息到构建记录
+                build['container_name'] = container_name
+                build['test_port'] = port
+                build['test_url'] = f'http://localhost:{port}'
+                self.save_builds()
+                
                 self.log_message(f"✅ 测试容器启动成功: {container_name}")
-                self.log_message(f"🌐 访问地址: http://localhost:3000")
+                self.log_message(f"🌐 访问地址: http://localhost:{port}")
                 self.log_message(f"💡 停止测试: docker stop {container_name}")
+                
+                # 刷新构建列表显示
+                self.root.after(0, self.refresh_builds_list)
             else:
                 self.log_message(f"❌ 测试容器启动失败: {result.stderr}")
                 
@@ -921,6 +1032,8 @@ class PublisherGUI:
                 build['app_name'],
                 version,
                 build['file_path'],
+                username,
+                token,
                 self.log_message
             )
             
@@ -986,6 +1099,50 @@ networks:
             except Exception as e:
                 messagebox.showerror("错误", f"保存失败: {e}")
     
+    def stop_selected_container(self):
+        """停止选中构建的容器"""
+        self.log_message("⏹️ 停止容器按钮被点击")
+        build = self.get_selected_build()
+        if not build:
+            return
+        
+        if 'container_name' not in build:
+            messagebox.showwarning("警告", "该构建没有运行中的容器")
+            return
+        
+        # 启动停止容器的线程
+        threading.Thread(target=self._stop_container_worker, args=(build,), daemon=True).start()
+    
+    def _stop_container_worker(self, build):
+        """停止容器工作线程"""
+        try:
+            docker_cmd = find_docker_command()
+            if not docker_cmd:
+                self.log_message("❌ 未找到Docker命令")
+                return
+            
+            container_name = build['container_name']
+            self.log_message(f"正在停止容器: {container_name}")
+            
+            # 停止容器
+            result = subprocess.run([docker_cmd, 'stop', container_name], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                self.log_message(f"✅ 容器已停止: {container_name}")
+                # 清除容器相关信息
+                if 'test_port' in build:
+                    del build['test_port']
+                if 'test_url' in build:
+                    del build['test_url']
+                self.save_builds()
+                # 刷新构建列表
+                self.root.after(0, self.refresh_builds_list)
+            else:
+                self.log_message(f"❌ 停止容器失败: {result.stderr}")
+                
+        except Exception as e:
+            self.log_message(f"停止容器异常: {e}")
+    
     def delete_selected_build(self):
         """删除选中的构建"""
         self.log_message("🗑️ 删除构建按钮被点击")
@@ -1032,7 +1189,31 @@ networks:
         
         self.log_message("未找到匹配的构建记录")
     
-
+    def on_build_double_click(self, event):
+        """构建双击事件处理 - 打开访问地址"""
+        build = self.get_selected_build()
+        if not build:
+            return
+        
+        # 检查是否有运行中的容器
+        if 'container_name' in build:
+            status = get_container_status(build['container_name'])
+            if status and status.get('running'):
+                test_url = build.get('test_url', '')
+                if test_url:
+                    import webbrowser
+                    try:
+                        webbrowser.open(test_url)
+                        self.log_message(f"已打开访问地址: {test_url}")
+                    except Exception as e:
+                        self.log_message(f"打开访问地址失败: {e}")
+                        messagebox.showerror("错误", f"无法打开访问地址: {e}")
+                else:
+                    messagebox.showwarning("警告", "该构建没有可用的访问地址")
+            else:
+                messagebox.showwarning("警告", "该构建的容器未运行，请先启动本地测试")
+        else:
+            messagebox.showwarning("警告", "该构建没有运行中的容器")
     
     def run(self):
         """运行GUI"""
