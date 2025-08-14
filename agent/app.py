@@ -543,6 +543,7 @@ class PublisherGUI:
     
     def show_zip_structure(self, zip_path):
         """显示zip文件的目录结构"""
+        print("show_zip_structure")
         if not self.structure_tree:
             return
             
@@ -550,90 +551,60 @@ class PublisherGUI:
             # 清空现有内容
             for item in self.structure_tree.get_children():
                 self.structure_tree.delete(item)
-            
+            print("XXXXXX")
             # 读取zip文件内容
             with zipfile.ZipFile(zip_path, 'r') as zip_file:
+                print("YYYYYYY")
                 file_list = zip_file.namelist()
+                
+                print("\n=== ZIP文件内容调试 ===")
+                print(f"原始文件列表 ({len(file_list)}个):")
+                for i, f in enumerate(file_list):
+                    print(f"  {i}: '{f}'")
                 
                 # 构建树形结构
                 nodes = {}
+                print("\n=== 路径解析调试 ===")
                 
                 for file_path in sorted(file_list):
-                    parts = file_path.split('/')
-                    current_path = ''
+                    if not file_path or file_path == '.':
+                        continue
+                        
+                    parts = [p for p in file_path.split('/') if p]  # 过滤空字符串
+                    print(f"\n文件路径: '{file_path}' -> 部分: {parts}")
                     
-                    for i, part in enumerate(parts):
-                        if not part:  # 跳过空字符串
-                            continue
-                            
-                        parent_path = current_path
-                        current_path = '/'.join(parts[:i+1]) if current_path else part
+                    # 逐级构建路径
+                    for i in range(len(parts)):
+                        current_parts = parts[:i+1]
+                        current_path = '/'.join(current_parts)
                         
                         if current_path not in nodes:
-                            if parent_path and parent_path in nodes:
-                                parent_id = nodes[parent_path]
-                            else:
+                            # 确定父节点
+                            if i == 0:
                                 parent_id = ''
+                                parent_path = 'ROOT'
+                            else:
+                                parent_path = '/'.join(parts[:i])
+                                parent_id = nodes.get(parent_path, '')
+                            
+                            part_name = parts[i]
                             
                             # 判断是文件还是目录
-                            is_dir = file_path.endswith('/') or i < len(parts) - 1
+                            is_dir = (i < len(parts) - 1) or file_path.endswith('/')
                             icon = '📁' if is_dir else '📄'
+                            
+                            print(f"  创建节点: '{part_name}' (路径: {current_path}, 父: {parent_path}, 类型: {'目录' if is_dir else '文件'})")
                             
                             node_id = self.structure_tree.insert(
                                 parent_id, 'end', 
-                                text=f"{icon} {part}",
+                                text=f"{icon} {part_name}",
                                 open=True if i < 2 else False  # 前两层默认展开
                             )
                             nodes[current_path] = node_id
                 
-                self.log_message(f"已显示zip文件结构: {len(file_list)}个文件")
-                
-        except Exception as e:
-            self.log_message(f"读取zip文件失败: {e}")            
-            # 显示错误信息
-            self.structure_tree.insert('', 'end', text=f"❌ 读取失败: {str(e)}")
-    
-    def show_zip_structure(self, zip_path):
-        """显示zip文件的目录结构"""
-        if not self.structure_tree:
-            return
-            
-        try:
-            # 清空现有内容
-            for item in self.structure_tree.get_children():
-                self.structure_tree.delete(item)
-            
-            with zipfile.ZipFile(zip_path, 'r') as zip_file:
-                file_list = zip_file.namelist()
-                
-                # 构建树形结构
-                nodes = {}  # 存储已创建的节点
-                
-                for file_path in sorted(file_list):
-                    if file_path.endswith('/'):
-                        continue  # 跳过目录条目
-                    
-                    parts = file_path.split('/')
-                    current_path = ''
-                    parent_id = ''
-                    
-                    for i, part in enumerate(parts):
-                        if not part:  # 跳过空部分
-                            continue
-                            
-                        current_path = '/'.join(parts[:i+1]) if current_path else part
-                        
-                        if current_path not in nodes:
-                            # 判断是否为目录
-                            is_dir = file_path.endswith('/') or i < len(parts) - 1
-                            icon = '📁' if is_dir else '📄'
-                            
-                            node_id = self.structure_tree.insert(
-                                parent_id, 'end', 
-                                text=f"{icon} {part}",
-                                open=True if i < 2 else False  # 前两层默认展开
-                            )
-                            nodes[current_path] = node_id
+                print("\n=== 最终节点映射 ===")
+                for path, node_id in nodes.items():
+                    print(f"  '{path}' -> {node_id}")
                 
                 self.log_message(f"已显示zip文件结构: {len(file_list)}个文件")
                 
