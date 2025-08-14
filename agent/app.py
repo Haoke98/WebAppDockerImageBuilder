@@ -33,6 +33,7 @@ except ImportError:
 CONFIG = {
     'DOCKERHUB_USERNAME': os.getenv('DOCKERHUB_USERNAME', ''),
     'DOCKERHUB_TOKEN': os.getenv('DOCKERHUB_TOKEN', ''),
+    'MAINTAINER': os.getenv('MAINTAINER', 'HZXY DevOps Team'),
     'BASE_IMAGE_NAME': 'hzxy-webapp-base',
     'BUILD_FOLDER': 'builds',
     'CONFIG_FILE': os.path.expanduser('~/.hzxy-agent-config.json')
@@ -57,6 +58,7 @@ def save_config():
         config_to_save = {
             'DOCKERHUB_USERNAME': CONFIG['DOCKERHUB_USERNAME'],
             'DOCKERHUB_TOKEN': CONFIG['DOCKERHUB_TOKEN'],
+            'MAINTAINER': CONFIG['MAINTAINER'],
             'BASE_IMAGE_NAME': CONFIG['BASE_IMAGE_NAME']
         }
         with open(CONFIG['CONFIG_FILE'], 'w', encoding='utf-8') as f:
@@ -151,7 +153,7 @@ def run_command(cmd, cwd=None, callback=None, env=None):
     except Exception as e:
         return False, '', str(e)
 
-def create_dockerfile(app_name, version):
+def create_dockerfile(app_name, version, maintainer="HZXY DevOps Team"):
     """创建Dockerfile"""
     dockerfile_content = f'''
 FROM nginx:alpine
@@ -179,7 +181,7 @@ RUN cd /tmp && unzip dist.zip && \
 LABEL app.name="{app_name}"
 LABEL app.version="{version}"
 LABEL app.build.date="{datetime.now().isoformat()}"
-LABEL maintainer="HZXY DevOps Team"
+LABEL maintainer="{maintainer}"
 
 # 暴露端口
 EXPOSE 80
@@ -216,7 +218,7 @@ def build_image(dist_file_path, app_name, build_time, callback=None):
         
         # 创建Dockerfile
         log("创建Dockerfile...")
-        dockerfile_content = create_dockerfile(app_name, build_time)
+        dockerfile_content = create_dockerfile(app_name, build_time, CONFIG['MAINTAINER'])
         with open(build_dir / 'Dockerfile', 'w', encoding='utf-8') as f:
             f.write(dockerfile_content)
         
@@ -288,7 +290,7 @@ def build_and_push_image(app_name, version, dist_file_path, username=None, token
         
         # 创建Dockerfile
         log("创建Dockerfile...")
-        dockerfile_content = create_dockerfile(app_name, version)
+        dockerfile_content = create_dockerfile(app_name, version, CONFIG['MAINTAINER'])
         with open(build_dir / 'Dockerfile', 'w', encoding='utf-8') as f:
             f.write(dockerfile_content)
         
@@ -427,7 +429,13 @@ class PublisherGUI:
         token_entry = ttk.Entry(config_frame, textvariable=self.token_var, show="*")
         token_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
         
-        ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=2)
+        ttk.Label(config_frame, text="维护者:").grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+        self.maintainer_var = tk.StringVar()
+        maintainer_entry = ttk.Entry(config_frame, textvariable=self.maintainer_var)
+        maintainer_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        maintainer_entry.insert(0, "HZXY DevOps Team")
+        
+        ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=3)
         
         # 新建构建
         build_frame = ttk.LabelFrame(left_panel, text="新建构建", padding="10")
@@ -687,6 +695,7 @@ class PublisherGUI:
         """保存设置"""
         CONFIG['DOCKERHUB_USERNAME'] = self.username_var.get().strip()
         CONFIG['DOCKERHUB_TOKEN'] = self.token_var.get().strip()
+        CONFIG['MAINTAINER'] = self.maintainer_var.get().strip()
         save_config()
         self.log_message("配置已保存")
         messagebox.showinfo("成功", "配置已保存")
@@ -700,6 +709,11 @@ class PublisherGUI:
             self.token_var.set(CONFIG['DOCKERHUB_TOKEN'])  # 保留实际token值
         else:
             self.token_var.set("")
+        # 加载maintainer设置
+        if CONFIG.get('MAINTAINER'):
+            self.maintainer_var.set(CONFIG['MAINTAINER'])
+        else:
+            self.maintainer_var.set("HZXY DevOps Team")
     
     def load_builds(self):
         """加载构建历史"""
@@ -850,14 +864,14 @@ class PublisherGUI:
         
         # 查找对应的构建记录
         for build in self.builds:
-            self.log_message(f"比较构建记录: '{build['app_name']}' - '{build['build_time']}' (类型: {type(build['build_time'])})")
+            # self.log_message(f"比较构建记录: '{build['app_name']}' - '{build['build_time']}' (类型: {type(build['build_time'])})")
             
             # 处理时间格式差异：移除下划线进行比较
             stored_time = build['build_time'].replace('_', '')
             selected_time = build_time.replace('_', '')
             
-            self.log_message(f"格式化后比较: '{stored_time}' vs '{selected_time}'")
-            self.log_message(f"app_name匹配: {build['app_name'] == app_name}, build_time匹配: {stored_time == selected_time}")
+            # self.log_message(f"格式化后比较: '{stored_time}' vs '{selected_time}'")
+            # self.log_message(f"app_name匹配: {build['app_name'] == app_name}, build_time匹配: {stored_time == selected_time}")
             
             if build['app_name'] == app_name and stored_time == selected_time:
                 self.log_message(f"找到匹配的构建记录: {build}")
@@ -1242,14 +1256,14 @@ networks:
         
         # 查找对应的构建记录
         for build in self.builds:
-            self.log_message(f"比较构建记录: '{build['app_name']}' - '{build['build_time']}' (类型: {type(build['build_time'])})")
+            # self.log_message(f"比较构建记录: '{build['app_name']}' - '{build['build_time']}' (类型: {type(build['build_time'])})")
             
             # 处理时间格式差异：移除下划线进行比较
             stored_time = build['build_time'].replace('_', '')
             selected_time = build_time.replace('_', '')
             
-            self.log_message(f"格式化后比较: '{stored_time}' vs '{selected_time}'")
-            self.log_message(f"app_name匹配: {build['app_name'] == app_name}, build_time匹配: {stored_time == selected_time}")
+            # self.log_message(f"格式化后比较: '{stored_time}' vs '{selected_time}'")
+            # self.log_message(f"app_name匹配: {build['app_name'] == app_name}, build_time匹配: {stored_time == selected_time}")
             
             if build['app_name'] == app_name and stored_time == selected_time:
                 self.log_message(f"找到匹配的构建记录: {build}")
