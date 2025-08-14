@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-HZXY WEB应用容器发布Agent
+WEB应用容器发布Agent
 开发环境专用工具，用于构建前端应用容器镜像并发布到DockerHub
 支持GUI界面和命令行两种使用方式
 """
@@ -443,7 +443,13 @@ class PublisherGUI:
         service_prefix_entry.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
         service_prefix_entry.insert(0, "hzxy")
         
-        ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=4)
+        ttk.Label(config_frame, text="基础镜像名:").grid(row=4, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+        self.base_image_name_var = tk.StringVar()
+        base_image_name_entry = ttk.Entry(config_frame, textvariable=self.base_image_name_var)
+        base_image_name_entry.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        base_image_name_entry.insert(0, "hzxy-webapp-base")
+        
+        ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=5)
         
         # 新建构建
         build_frame = ttk.LabelFrame(left_panel, text="新建构建", padding="10")
@@ -676,6 +682,7 @@ class PublisherGUI:
         CONFIG['DOCKERHUB_TOKEN'] = self.token_var.get().strip()
         CONFIG['MAINTAINER'] = self.maintainer_var.get().strip()
         CONFIG['SERVICE_PREFIX'] = self.service_prefix_var.get().strip()
+        CONFIG['BASE_IMAGE_NAME'] = self.base_image_name_var.get().strip()
         save_config()
         self.log_message("配置已保存")
         messagebox.showinfo("成功", "配置已保存")
@@ -699,6 +706,11 @@ class PublisherGUI:
             self.service_prefix_var.set(CONFIG['SERVICE_PREFIX'])
         else:
             self.service_prefix_var.set("hzxy")
+        # 加载基础镜像名称设置
+        if CONFIG.get('BASE_IMAGE_NAME'):
+            self.base_image_name_var.set(CONFIG['BASE_IMAGE_NAME'])
+        else:
+            self.base_image_name_var.set("hzxy-webapp-base")
     
     def load_builds(self):
         """加载构建历史"""
@@ -1291,7 +1303,7 @@ networks:
 # 命令行接口
 @click.group()
 def cli():
-    """HZXY WEB应用容器发布工具"""
+    """WEB应用容器发布工具"""
     load_config()
 
 @cli.command()
