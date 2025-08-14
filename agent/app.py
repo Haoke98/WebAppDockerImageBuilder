@@ -34,6 +34,7 @@ CONFIG = {
     'DOCKERHUB_USERNAME': os.getenv('DOCKERHUB_USERNAME', ''),
     'DOCKERHUB_TOKEN': os.getenv('DOCKERHUB_TOKEN', ''),
     'MAINTAINER': os.getenv('MAINTAINER', 'HZXY DevOps Team'),
+    'SERVICE_PREFIX': os.getenv('SERVICE_PREFIX', 'hzxy'),
     'BASE_IMAGE_NAME': 'hzxy-webapp-base',
     'BUILD_FOLDER': 'builds',
     'CONFIG_FILE': os.path.expanduser('~/.hzxy-agent-config.json')
@@ -59,6 +60,7 @@ def save_config():
             'DOCKERHUB_USERNAME': CONFIG['DOCKERHUB_USERNAME'],
             'DOCKERHUB_TOKEN': CONFIG['DOCKERHUB_TOKEN'],
             'MAINTAINER': CONFIG['MAINTAINER'],
+            'SERVICE_PREFIX': CONFIG['SERVICE_PREFIX'],
             'BASE_IMAGE_NAME': CONFIG['BASE_IMAGE_NAME']
         }
         with open(CONFIG['CONFIG_FILE'], 'w', encoding='utf-8') as f:
@@ -435,7 +437,13 @@ class PublisherGUI:
         maintainer_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
         maintainer_entry.insert(0, "HZXY DevOps Team")
         
-        ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=3)
+        ttk.Label(config_frame, text="服务前缀:").grid(row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+        self.service_prefix_var = tk.StringVar()
+        service_prefix_entry = ttk.Entry(config_frame, textvariable=self.service_prefix_var)
+        service_prefix_entry.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        service_prefix_entry.insert(0, "hzxy")
+        
+        ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=4)
         
         # 新建构建
         build_frame = ttk.LabelFrame(left_panel, text="新建构建", padding="10")
@@ -667,6 +675,7 @@ class PublisherGUI:
         CONFIG['DOCKERHUB_USERNAME'] = self.username_var.get().strip()
         CONFIG['DOCKERHUB_TOKEN'] = self.token_var.get().strip()
         CONFIG['MAINTAINER'] = self.maintainer_var.get().strip()
+        CONFIG['SERVICE_PREFIX'] = self.service_prefix_var.get().strip()
         save_config()
         self.log_message("配置已保存")
         messagebox.showinfo("成功", "配置已保存")
@@ -684,7 +693,12 @@ class PublisherGUI:
         if CONFIG.get('MAINTAINER'):
             self.maintainer_var.set(CONFIG['MAINTAINER'])
         else:
-            self.maintainer_var.set("HZXY DevOps Team")
+            self.maintainer_var.set("DevOps Team")
+        # 加载服务前缀设置
+        if CONFIG.get('SERVICE_PREFIX'):
+            self.service_prefix_var.set(CONFIG['SERVICE_PREFIX'])
+        else:
+            self.service_prefix_var.set("hzxy")
     
     def load_builds(self):
         """加载构建历史"""
@@ -1052,18 +1066,19 @@ class PublisherGUI:
         app_name = build['app_name']
         version = build['published_version']
         
+        service_prefix = CONFIG.get('SERVICE_PREFIX', 'hzxy')
         template = f'''services:
-  hzxy-{app_name}:
+  {service_prefix}-{app_name}:
     image: {username}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:{version}
-    container_name: hzxy-{app_name}
+    container_name: {service_prefix}-{app_name}
     ports:
       - "3000:80"
     restart: unless-stopped
     networks:
-      - hzxy-network
+      - {service_prefix}-network
 
 networks:
-  hzxy-network:
+  {service_prefix}-network:
     driver: bridge
 '''
         
@@ -1340,18 +1355,20 @@ def config():
 @click.option('--port', default=3000, help='端口号')
 def template(app_name, port):
     """生成docker-compose模板"""
+    load_config()  # 确保加载最新配置
+    service_prefix = CONFIG.get('SERVICE_PREFIX', 'hzxy')
     template_content = f'''services:
-  hzxy-{app_name}:
+  {service_prefix}-{app_name}:
     image: {CONFIG['DOCKERHUB_USERNAME'] or 'your_dockerhub_username'}/{CONFIG['BASE_IMAGE_NAME']}-{app_name}:latest
-    container_name: hzxy-{app_name}
+    container_name: {service_prefix}-{app_name}
     ports:
       - "{port}:80"
     restart: unless-stopped
     networks:
-      - hzxy-network
+      - {service_prefix}-network
 
 networks:
-  hzxy-network:
+  {service_prefix}-network:
     driver: bridge
 '''
     
