@@ -1082,22 +1082,91 @@ networks:
     driver: bridge
 '''
         
-        # 保存到文件
-        file_path = filedialog.asksaveasfilename(
-            title="保存docker-compose模板",
-            defaultextension=".yml",
-            filetypes=[("YAML文件", "*.yml"), ("所有文件", "*.*")],
-            initialvalue=f"docker-compose-{app_name}.yml"
-        )
+        # 显示YAML预览和编辑窗口
+        self._show_yaml_editor(template, f"docker-compose-{app_name}.yml")
+    
+    def _show_yaml_editor(self, content, filename):
+        """显示YAML编辑器窗口"""
+        # 创建新窗口
+        editor_window = tk.Toplevel(self.root)
+        editor_window.title(f"编辑 {filename}")
+        editor_window.geometry("800x600")
+        editor_window.transient(self.root)
+        editor_window.grab_set()
         
-        if file_path:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(template)
-                self.log_message(f"docker-compose模板已保存到: {file_path}")
-                messagebox.showinfo("成功", f"模板已保存到: {file_path}")
-            except Exception as e:
-                messagebox.showerror("错误", f"保存失败: {e}")
+        # 创建主框架
+        main_frame = ttk.Frame(editor_window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 标题标签
+        title_label = ttk.Label(main_frame, text=f"Docker Compose 模板: {filename}", font=('Arial', 12, 'bold'))
+        title_label.pack(pady=(0, 10))
+        
+        # 文本编辑区域
+        text_frame = ttk.Frame(main_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        text_area = scrolledtext.ScrolledText(
+            text_frame,
+            wrap=tk.NONE,
+            font=('Consolas', 11),
+            bg='#f8f8f8',
+            fg='#333333',
+            insertbackground='#333333',
+            selectbackground='#0078d4',
+            selectforeground='white'
+        )
+        text_area.pack(fill=tk.BOTH, expand=True)
+        text_area.insert('1.0', content)
+        
+        # 按钮框架
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        # 复制到剪贴板按钮
+        def copy_to_clipboard():
+            content = text_area.get('1.0', tk.END)
+            editor_window.clipboard_clear()
+            editor_window.clipboard_append(content.strip())
+            messagebox.showinfo("成功", "内容已复制到剪贴板")
+        
+        copy_btn = ttk.Button(button_frame, text="📋 复制到剪贴板", command=copy_to_clipboard)
+        copy_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 保存到文件按钮
+        def save_to_file():
+            file_path = filedialog.asksaveasfilename(
+                title="保存docker-compose模板",
+                defaultextension=".yml",
+                filetypes=[("YAML文件", "*.yml"), ("所有文件", "*.*")],
+                initialfile=filename
+            )
+            
+            if file_path:
+                try:
+                    content = text_area.get('1.0', tk.END)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content.strip())
+                    self.log_message(f"docker-compose模板已保存到: {file_path}")
+                    messagebox.showinfo("成功", f"模板已保存到: {file_path}")
+                except Exception as e:
+                    messagebox.showerror("错误", f"保存失败: {e}")
+        
+        save_btn = ttk.Button(button_frame, text="💾 保存到文件", command=save_to_file)
+        save_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 关闭按钮
+        def close_window():
+            editor_window.destroy()
+        
+        close_btn = ttk.Button(button_frame, text="❌ 关闭", command=close_window)
+        close_btn.pack(side=tk.RIGHT)
+        
+        # 设置窗口居中
+        editor_window.update_idletasks()
+        x = (editor_window.winfo_screenwidth() // 2) - (editor_window.winfo_width() // 2)
+        y = (editor_window.winfo_screenheight() // 2) - (editor_window.winfo_height() // 2)
+        editor_window.geometry(f"+{x}+{y}")
     
     def stop_selected_container(self):
         """停止选中构建的容器"""
