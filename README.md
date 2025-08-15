@@ -1,75 +1,223 @@
-# 前端项目容器化部署
+# WEB应用容器发布Agent
 
-这个项目提供了一个完整的Docker解决方案来部署两个独立的前端应用：AI招商和产业大脑。
+开发环境专用工具，用于构建前端应用容器镜像并发布到DockerHub。支持GUI界面和命令行两种使用方式。
 
-## 使用方法
-
-### 1. 准备文件
-将前端团队提供的编译好的dist文件放在项目根目录下：
-- AI招商应用：`ai-zhaoshang-dist.zip`
-- 产业大脑应用：`chanye-danao-dist.zip`
-
-### 2. 使用Docker Compose部署
-```bash
-# 启动所有服务
-docker compose up -d
-
-# 启动单个服务
-docker compose up -d hzxy-ai-zhaoshang
-docker compose up -d hzxy-chanye-danao
-```
-
-### 3. 访问应用
-- AI招商应用：`http://localhost:3002`
-- 产业大脑应用：`http://localhost:3001`
+![应用界面截图](assets/image.png)
 
 ## 功能特性
 
-- **基于Nginx Alpine**: 使用轻量级的nginx alpine镜像，体积小，性能好
-- **自动解压**: 自动解压dist.zip文件并部署到nginx目录
-- **SPA支持**: 配置了单页应用路由支持，所有路由都会回退到index.html
-- **静态资源缓存**: 对JS、CSS、图片等静态资源配置了1年的缓存策略
-- **生产优化**: 删除了不必要的文件和工具，减小镜像体积
+- 🖥️ **跨平台支持**: Windows、macOS、Linux
+- 🎨 **GUI界面**: 基于tkinter的友好图形界面
+- 💻 **命令行工具**: 支持脚本自动化
+- 🐳 **Docker集成**: 自动构建和推送镜像到DockerHub
+- 📋 **模板生成**: 自动生成docker-compose部署模板
+- ⚙️ **配置管理**: 支持配置文件和环境变量
+- 🔧 **可配置化**: 支持自定义服务前缀和基础镜像名称
 
-## 目录结构
-```
-.
-├── Dockerfile          # Docker构建文件
-├── .dockerignore       # Docker忽略文件
-├── README.md          # 说明文档
-└── dist.zip           # 前端编译文件（需要放置）
+## 安装要求
+
+### 系统要求
+- Python 3.7+
+- Docker Desktop (已安装并运行)
+- DockerHub账号和访问令牌
+
+### Python依赖
+```bash
+pip install -r requirements.txt
 ```
 
-## 常用Docker Compose命令
+## 快速开始
+
+### 1. 环境配置
+
+设置DockerHub凭据（二选一）：
+
+**方法一：环境变量**
+```bash
+export DOCKERHUB_USERNAME=your_username
+export DOCKERHUB_TOKEN=your_token
+```
+
+**方法二：GUI界面配置**
+```bash
+python app.py start --gui
+```
+
+### 2. 启动方式
+
+**GUI模式（推荐）**
+```bash
+# 直接运行（默认启动GUI）
+python app.py
+
+# 或明确指定GUI模式
+python app.py start --gui
+
+# 使用便捷脚本
+./start.sh
+```
+
+**命令行模式**
+```bash
+# 发布应用
+python app.py publish ai-zhaoshang 1.0.0 /path/to/dist.zip
+
+# 查看配置
+python app.py config
+
+# 生成docker-compose模板
+python app.py template ai-zhaoshang --port 3000
+
+# 查看帮助
+python app.py --help
+```
+
+## 使用流程
+
+### GUI模式使用流程
+
+1. **配置参数**
+   - 填写DockerHub用户名和访问令牌
+   - 设置维护者信息
+   - 配置服务前缀（默认：hzxy）
+   - 配置基础镜像名称（默认：hzxy-webapp-base）
+   - 点击"保存配置"
+
+2. **填写应用信息**
+   - 应用名称：如 `ai-zhaoshang`
+   - 版本号：如 `1.0.0`
+
+3. **选择文件**
+   - 点击"选择文件"按钮
+   - 选择前端团队提供的 `dist.zip` 文件
+
+4. **构建发布**
+   - 点击"🚀 构建并发布"按钮
+   - 查看实时构建日志
+   - 等待发布完成
+
+5. **生成部署模板**
+   - 点击"📋 生成docker-compose模板"
+   - 保存模板文件用于AI盒子部署
+
+### 命令行模式使用流程
 
 ```bash
-# 查看运行中的容器
-docker compose ps
+# 1. 检查配置
+python app.py config
 
-# 停止所有服务
-docker compose down
+# 2. 发布应用
+python app.py publish ai-zhaoshang 1.0.0 ./ai-zhaoshang-dist.zip
 
-# 停止单个服务
-docker compose stop hzxy-ai-zhaoshang
-docker compose stop hzxy-chanye-danao
-
-# 重启服务
-docker compose restart
-
-# 查看容器日志
-docker compose logs hzxy-ai-zhaoshang
-docker compose logs hzxy-chanye-danao
-
-# 查看所有服务日志
-docker compose logs
+# 3. 生成部署模板
+python app.py template ai-zhaoshang --port 3000
 ```
 
-## 注意事项
+## 镜像命名规范
 
-1. 确保两个dist文件都在项目根目录：
-   - `ai-zhaoshang-dist.zip`（AI招商应用）
-   - `chanye-danao-dist.zip`（产业大脑应用）
-2. 两个应用使用不同端口：AI招商(3002)，产业大脑(3001)
-3. 如果需要修改端口，可以在docker-compose.yml中调整ports配置
-4. 如果前端应用有特殊的nginx配置需求，可以修改Dockerfile中的nginx配置部分
-5. 可以独立部署单个应用，也可以同时部署两个应用
+生成的Docker镜像遵循以下命名规范：
+- 格式：`{DOCKERHUB_USERNAME}/{BASE_IMAGE_NAME}-{应用名称}:{版本号}`
+- 示例：`myuser/hzxy-webapp-base-ai-zhaoshang:1.0.0`
+- 同时会创建 `latest` 标签
+- BASE_IMAGE_NAME 可在GUI界面配置，默认为 `hzxy-webapp-base`
+
+## 部署模板
+
+工具会自动生成适用于AI盒子的docker-compose模板：
+
+```yaml
+services:
+  hzxy-ai-zhaoshang:
+    image: myuser/hzxy-webapp-base-ai-zhaoshang:latest
+    container_name: hzxy-ai-zhaoshang
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    networks:
+      - hzxy-network
+
+networks:
+  hzxy-network:
+    driver: bridge
+```
+
+**注意**: 服务名称和网络名称中的前缀（如 `hzxy-`）可在GUI界面配置，默认为 `hzxy`
+
+## 文件结构
+
+```
+agent/
+├── app.py              # 主程序文件
+├── requirements.txt    # Python依赖
+├── start.sh           # 启动脚本
+├── README.md          # 说明文档
+├── builds/            # 构建临时目录
+└── ~/.hzxy-agent-config.json  # 配置文件
+```
+
+## 配置文件
+
+配置文件位置：`~/.hzxy-agent-config.json`
+
+```json
+{
+  "DOCKERHUB_USERNAME": "your_username",
+  "DOCKERHUB_TOKEN": "your_token",
+  "MAINTAINER": "HZXY DevOps Team",
+  "SERVICE_PREFIX": "hzxy",
+  "BASE_IMAGE_NAME": "hzxy-webapp-base"
+}
+```
+
+## 故障排除
+
+### 常见问题
+
+**1. GUI模式无法启动**
+```
+警告: 无法导入tkinter，GUI模式不可用
+```
+解决方案：
+- macOS: `brew install python-tk`
+- Ubuntu: `sudo apt-get install python3-tk`
+- Windows: 重新安装Python并勾选tkinter组件
+
+**2. Docker构建失败**
+```
+Cannot connect to the Docker daemon
+```
+解决方案：
+- 确保Docker Desktop已启动
+- 检查Docker服务状态
+
+**3. DockerHub推送失败**
+```
+denied: requested access to the resource is denied
+```
+解决方案：
+- 检查DockerHub用户名和Token是否正确
+- 确保Token有推送权限
+
+### 日志查看
+
+- GUI模式：查看界面底部的"构建日志"区域
+- 命令行模式：直接在终端查看输出
+- 构建过程中的临时文件在 `builds/` 目录
+
+## 开发说明
+
+### 项目结构
+- `PublisherGUI`: GUI界面类
+- `build_and_push_image()`: 核心构建发布函数
+- `cli`: Click命令行接口
+- 配置管理：支持文件和环境变量
+
+### 扩展功能
+- 支持多种基础镜像
+- 自定义Dockerfile模板
+- 批量发布功能
+- 发布历史记录
+
+## 许可证
+
+内部工具，仅供HZXY团队使用。
