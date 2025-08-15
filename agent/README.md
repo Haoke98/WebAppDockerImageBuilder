@@ -1,6 +1,8 @@
-# HZXY WEB应用容器发布Agent
+# WEB应用容器发布Agent
 
 开发环境专用工具，用于构建前端应用容器镜像并发布到DockerHub。支持GUI界面和命令行两种使用方式。
+
+![应用界面截图](../assets/image.png)
 
 ## 功能特性
 
@@ -10,6 +12,7 @@
 - 🐳 **Docker集成**: 自动构建和推送镜像到DockerHub
 - 📋 **模板生成**: 自动生成docker-compose部署模板
 - ⚙️ **配置管理**: 支持配置文件和环境变量
+- 🔧 **可配置化**: 支持自定义服务前缀和基础镜像名称
 
 ## 安装要求
 
@@ -73,8 +76,11 @@ python app.py --help
 
 ### GUI模式使用流程
 
-1. **配置DockerHub**
+1. **配置参数**
    - 填写DockerHub用户名和访问令牌
+   - 设置维护者信息
+   - 配置服务前缀（默认：hzxy）
+   - 配置基础镜像名称（默认：hzxy-webapp-base）
    - 点击"保存配置"
 
 2. **填写应用信息**
@@ -110,9 +116,10 @@ python app.py template ai-zhaoshang --port 3000
 ## 镜像命名规范
 
 生成的Docker镜像遵循以下命名规范：
-- 格式：`{DOCKERHUB_USERNAME}/hzxy-webapp-base-{应用名称}:{版本号}`
+- 格式：`{DOCKERHUB_USERNAME}/{BASE_IMAGE_NAME}-{应用名称}:{版本号}`
 - 示例：`myuser/hzxy-webapp-base-ai-zhaoshang:1.0.0`
 - 同时会创建 `latest` 标签
+- BASE_IMAGE_NAME 可在GUI界面配置，默认为 `hzxy-webapp-base`
 
 ## 部署模板
 
@@ -134,6 +141,8 @@ networks:
     driver: bridge
 ```
 
+**注意**: 服务名称和网络名称中的前缀（如 `hzxy-`）可在GUI界面配置，默认为 `hzxy`
+
 ## 文件结构
 
 ```
@@ -153,6 +162,9 @@ agent/
 ```json
 {
   "DOCKERHUB_USERNAME": "your_username",
+  "DOCKERHUB_TOKEN": "your_token",
+  "MAINTAINER": "HZXY DevOps Team",
+  "SERVICE_PREFIX": "hzxy",
   "BASE_IMAGE_NAME": "hzxy-webapp-base"
 }
 ```

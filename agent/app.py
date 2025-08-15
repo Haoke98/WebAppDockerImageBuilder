@@ -377,7 +377,7 @@ class PublisherGUI:
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("HZXY WEB应用容器发布工具")
+        self.root.title("WEB应用容器发布工具")
         self.root.geometry("1000x800")
         self.root.resizable(True, True)
         
@@ -409,7 +409,7 @@ class PublisherGUI:
         main_frame.columnconfigure(1, weight=1)
         
         # 标题
-        title_label = ttk.Label(main_frame, text="🚀 HZXY WEB应用容器发布工具", font=('Arial', 16, 'bold'))
+        title_label = ttk.Label(main_frame, text="🚀 WEB应用容器发布工具", font=('Arial', 16, 'bold'))
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 20))
         
         # 左侧面板 - 配置和构建
