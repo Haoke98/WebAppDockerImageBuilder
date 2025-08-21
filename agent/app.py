@@ -50,9 +50,15 @@ CONFIG = {
     'CONFIG_FILE': os.path.expanduser('~/.hzxy-agent-config.json'),
     # JS底座配置
     'REMOTE_URL': '',
-    'REMOTE_USERNAME': '',
+    'REMOTE_USERNAME': 'Happy',
     'REMOTE_PASSWORD': '',
-    'CALLBACK_METHOD': ''
+    'CALLBACK_METHOD': '',
+    # 登录接口配置
+    'LOGIN_URL': "https://datacenter.zstzpt.com/api/chainAuthLogIn",
+    'REQUEST_METHOD': 'POST',
+    'CONTENT_TYPE': 'application/json',
+    'REQUEST_PARAMS': '{"userName":"{{username}}","passWord":"{{password}}"}',
+    'TOKEN_PATH': 'data.token'
 }
 
 # 确保构建目录存在
@@ -80,7 +86,12 @@ def save_config():
             'REMOTE_URL': CONFIG['REMOTE_URL'],
             'REMOTE_USERNAME': CONFIG['REMOTE_USERNAME'],
             'REMOTE_PASSWORD': CONFIG['REMOTE_PASSWORD'],
-            'CALLBACK_METHOD': CONFIG['CALLBACK_METHOD']
+            'CALLBACK_METHOD': CONFIG['CALLBACK_METHOD'],
+            'LOGIN_URL': CONFIG['LOGIN_URL'],
+            'REQUEST_METHOD': CONFIG['REQUEST_METHOD'],
+            'CONTENT_TYPE': CONFIG['CONTENT_TYPE'],
+            'REQUEST_PARAMS': CONFIG['REQUEST_PARAMS'],
+            'TOKEN_PATH': CONFIG['TOKEN_PATH']
         }
         with open(CONFIG['CONFIG_FILE'], 'w', encoding='utf-8') as f:
             json.dump(config_to_save, f, indent=2, ensure_ascii=False)
@@ -411,6 +422,9 @@ class PublisherGUI:
         self.structure_tree = None  # 目录结构树形控件
         self.log_text = False  # 日志文本控件
         
+        # JS底座临时文件管理
+        self.js_base_temp_dir = None
+        
         self.setup_ui()
         self.load_settings()
         self.load_builds()
@@ -479,7 +493,7 @@ class PublisherGUI:
         self.remote_url_var = tk.StringVar()
         remote_url_entry = ttk.Entry(js_base_frame, textvariable=self.remote_url_var)
         remote_url_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
-        remote_url_entry.insert(0, "https://example.com")
+        remote_url_entry.insert(0, "https://datacenter.zstzpt.com/Brain/SuperChain")
         
         ttk.Label(js_base_frame, text="用户名:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
         self.remote_username_var = tk.StringVar()
@@ -491,9 +505,45 @@ class PublisherGUI:
         remote_password_entry = ttk.Entry(js_base_frame, textvariable=self.remote_password_var, show="*")
         remote_password_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
         
-        ttk.Label(js_base_frame, text="回调方法:").grid(row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+        # 登录接口配置区域
+        login_config_frame = ttk.LabelFrame(js_base_frame, text="登录接口配置", padding="5")
+        login_config_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 5))
+        login_config_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(login_config_frame, text="接口地址:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.login_url_var = tk.StringVar()
+        login_url_entry = ttk.Entry(login_config_frame, textvariable=self.login_url_var)
+        login_url_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
+        login_url_entry.insert(0, "https://datacenter.zstzpt.com/api/chainAuthLogIn")
+        
+        ttk.Label(login_config_frame, text="请求类型:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(3, 0))
+        self.request_method_var = tk.StringVar()
+        method_combo = ttk.Combobox(login_config_frame, textvariable=self.request_method_var, values=["POST", "GET", "PUT"], state="readonly")
+        method_combo.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 5), pady=(3, 0))
+        method_combo.set("POST")
+        
+        ttk.Label(login_config_frame, text="Content-Type:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5), pady=(3, 0))
+        self.content_type_var = tk.StringVar()
+        content_type_combo = ttk.Combobox(login_config_frame, textvariable=self.content_type_var, values=["application/json", "application/x-www-form-urlencoded", "multipart/form-data"], state="readonly")
+        content_type_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 5), pady=(3, 0))
+        content_type_combo.set("application/json")
+        
+        ttk.Label(login_config_frame, text="请求参数:").grid(row=3, column=0, sticky=tk.W, padx=(0, 5), pady=(3, 0))
+        self.request_params_text = scrolledtext.ScrolledText(login_config_frame, height=3, width=40)
+        self.request_params_text.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=(0, 5), pady=(3, 0))
+        self.request_params_text.insert('1.0', '{"userName":"{{username}}","passWord":"{{password}}"}')
+        
+        ttk.Label(login_config_frame, text="Token路径:").grid(row=4, column=0, sticky=tk.W, padx=(0, 5), pady=(3, 0))
+        self.token_path_var = tk.StringVar()
+        token_path_entry = ttk.Entry(login_config_frame, textvariable=self.token_path_var)
+        token_path_entry.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=(0, 5), pady=(3, 0))
+        token_path_entry.insert(0, "data.token")
+        
+        ttk.Button(login_config_frame, text="🔧 自动生成回调", command=self.generate_callback).grid(row=5, column=0, columnspan=2, pady=(5, 0))
+        
+        ttk.Label(js_base_frame, text="回调方法:").grid(row=4, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
         self.callback_text = scrolledtext.ScrolledText(js_base_frame, height=6, width=50)
-        self.callback_text.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        self.callback_text.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
         # 默认回调方法模板
         default_callback = """// 免登录回调方法
 // 返回格式: {token: 'your_token', success: true}
@@ -507,7 +557,7 @@ function getAuthToken(username, password) {
 }"""
         self.callback_text.insert('1.0', default_callback)
         
-        ttk.Button(js_base_frame, text="🌐 启动JS底座", command=self.start_js_base).grid(row=4, column=0, columnspan=2, pady=(10, 0))
+        ttk.Button(js_base_frame, text="🌐 启动JS底座", command=self.start_js_base).grid(row=5, column=0, columnspan=2, pady=(10, 0))
         
         # 新建构建
         build_frame = ttk.LabelFrame(left_panel, text="新建构建", padding="10")
@@ -746,6 +796,12 @@ function getAuthToken(username, password) {
         CONFIG['REMOTE_USERNAME'] = self.remote_username_var.get().strip()
         CONFIG['REMOTE_PASSWORD'] = self.remote_password_var.get().strip()
         CONFIG['CALLBACK_METHOD'] = self.callback_text.get('1.0', tk.END).strip()
+        # 保存登录接口配置
+        CONFIG['LOGIN_URL'] = self.login_url_var.get().strip()
+        CONFIG['REQUEST_METHOD'] = self.request_method_var.get().strip()
+        CONFIG['CONTENT_TYPE'] = self.content_type_var.get().strip()
+        CONFIG['REQUEST_PARAMS'] = self.request_params_text.get('1.0', tk.END).strip()
+        CONFIG['TOKEN_PATH'] = self.token_path_var.get().strip()
         save_config()
         self.log_message("配置已保存")
         messagebox.showinfo("成功", "配置已保存")
@@ -785,6 +841,19 @@ function getAuthToken(username, password) {
         if CONFIG.get('CALLBACK_METHOD'):
             self.callback_text.delete('1.0', tk.END)
             self.callback_text.insert('1.0', CONFIG['CALLBACK_METHOD'])
+        
+        # 加载登录接口配置
+        if CONFIG.get('LOGIN_URL'):
+            self.login_url_var.set(CONFIG['LOGIN_URL'])
+        if CONFIG.get('REQUEST_METHOD'):
+            self.request_method_var.set(CONFIG['REQUEST_METHOD'])
+        if CONFIG.get('CONTENT_TYPE'):
+            self.content_type_var.set(CONFIG['CONTENT_TYPE'])
+        if CONFIG.get('REQUEST_PARAMS'):
+            self.request_params_text.delete('1.0', tk.END)
+            self.request_params_text.insert('1.0', CONFIG['REQUEST_PARAMS'])
+        if CONFIG.get('TOKEN_PATH'):
+            self.token_path_var.set(CONFIG['TOKEN_PATH'])
     
     def load_builds(self):
         """加载构建历史"""
@@ -1344,6 +1413,159 @@ networks:
         
         self.log_message("未找到匹配的构建记录")
     
+    def generate_callback(self):
+        """根据配置自动生成登录回调方法"""
+        try:
+            # 获取配置信息
+            login_url = self.login_url_var.get().strip()
+            request_method = self.request_method_var.get().strip()
+            content_type = self.content_type_var.get().strip()
+            request_params = self.request_params_text.get('1.0', tk.END).strip()
+            token_path = self.token_path_var.get().strip()
+            
+            if not login_url:
+                messagebox.showerror("错误", "请输入登录接口地址")
+                return
+            
+            if not token_path:
+                messagebox.showerror("错误", "请输入Token路径")
+                return
+            
+            # 生成JavaScript回调方法
+            callback_code = self._generate_callback_code(login_url, request_method, content_type, request_params, token_path)
+            
+            # 更新回调方法文本框
+            self.callback_text.delete('1.0', tk.END)
+            self.callback_text.insert('1.0', callback_code)
+            
+            messagebox.showinfo("成功", "回调方法已自动生成！")
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"生成回调方法失败: {str(e)}")
+    
+    def _generate_callback_code(self, login_url, request_method, content_type, request_params, token_path):
+        """生成JavaScript回调方法代码"""
+        # 解析Token路径
+        token_access_code = self._generate_token_access_code(token_path)
+        
+        # 处理请求参数
+        if content_type == "application/json":
+            # JSON格式
+            try:
+                # 替换模板变量
+                params_with_vars = request_params.replace('"{{username}}"', 'username').replace('"{{password}}"', 'password')
+                body_code = f"JSON.stringify({params_with_vars})"
+                content_type_header = "application/json"
+            except:
+                body_code = "JSON.stringify({username: username, password: password})"
+                content_type_header = "application/json"
+        elif content_type == "application/x-www-form-urlencoded":
+            # 表单格式
+            body_code = "new URLSearchParams({username: username, password: password}).toString()"
+            content_type_header = "application/x-www-form-urlencoded"
+        else:
+            # 默认JSON格式
+            body_code = "JSON.stringify({username: username, password: password})"
+            content_type_header = "application/json"
+        
+        # 处理登录URL - 如果是完整URL则直接使用，否则与baseUrl拼接
+        if login_url.startswith('http://') or login_url.startswith('https://'):
+            url_code = f"'{login_url}'"
+        else:
+            url_code = f"window.location.origin + '{login_url}'"
+        
+        # 生成完整的回调方法
+        callback_template = f"""// 自动生成的登录回调方法
+// 接口地址: {login_url}
+// 请求方法: {request_method}
+// Content-Type: {content_type}
+// Token路径: {token_path}
+function getAuthToken(username, password) {{
+    console.log('=== 开始登录请求 ===');
+    console.log('用户名:', username);
+    console.log('密码长度:', password ? password.length : 0);
+    
+    try {{
+        // 构建完整的登录URL
+        const loginUrl = {url_code};
+        console.log('登录URL:', loginUrl);
+        
+        // 构建请求体
+        const requestBody = {body_code};
+        console.log('请求体:', requestBody);
+        
+        // 发送登录请求
+        console.log('发送 {request_method} 请求...');
+        const xhr = new XMLHttpRequest();
+        xhr.open('{request_method}', loginUrl, false); // 同步请求
+        xhr.setRequestHeader('Content-Type', '{content_type_header}');
+        
+        xhr.send(requestBody);
+        
+        console.log('响应状态码:', xhr.status);
+        console.log('响应文本:', xhr.responseText);
+        
+        if (xhr.status === 200) {{
+            const response = JSON.parse(xhr.responseText);
+            console.log('解析后的响应:', response);
+            
+            // 根据配置的路径提取token
+            const token = {token_access_code};
+            console.log('提取的token:', token);
+            
+            if (token) {{
+                console.log('=== 登录成功 ===');
+                return {{
+                    token: token,
+                    success: true
+                }};
+            }} else {{
+                console.error('未找到token，路径:', '{token_path}');
+                console.error('响应结构:', JSON.stringify(response, null, 2));
+                return {{
+                    token: null,
+                    success: false,
+                    error: '未找到token'
+                }};
+            }}
+        }} else {{
+            console.error('登录失败，状态码:', xhr.status);
+            console.error('响应内容:', xhr.responseText);
+            return {{
+                token: null,
+                success: false,
+                error: '登录失败: ' + xhr.status
+            }};
+        }}
+    }} catch (error) {{
+        console.error('登录请求异常:', error);
+        console.error('错误堆栈:', error.stack);
+        return {{
+            token: null,
+            success: false,
+            error: '请求异常: ' + error.message
+        }};
+    }}
+}}"""
+        
+        return callback_template
+    
+    def _generate_token_access_code(self, token_path):
+        """根据Token路径生成JavaScript访问代码"""
+        if not token_path:
+            return "response"
+        
+        # 分割路径
+        path_parts = token_path.split('.')
+        
+        # 生成访问代码
+        access_code = "response"
+        for part in path_parts:
+            if part.strip():
+                access_code += f"['{part.strip()}']"
+        
+        return access_code
+    
     def start_js_base(self):
         """启动JS底座"""
         if not WEBVIEW_AVAILABLE:
@@ -1371,12 +1593,15 @@ networks:
     def _start_js_base_worker(self, remote_url, username, password, callback_method):
         """JS底座工作线程"""
         try:
+            # 清理之前的临时文件
+            self._cleanup_js_base_temp_files()
+            
             # 创建HTML页面
             html_content = self._create_js_base_html(remote_url, username, password, callback_method)
             
             # 创建临时HTML文件
-            temp_dir = tempfile.mkdtemp()
-            html_file = os.path.join(temp_dir, 'js_base.html')
+            self.js_base_temp_dir = tempfile.mkdtemp()
+            html_file = os.path.join(self.js_base_temp_dir, 'js_base.html')
             
             with open(html_file, 'w', encoding='utf-8') as f:
                 f.write(html_content)
@@ -1390,12 +1615,17 @@ networks:
         except Exception as e:
             self.log_message(f"JS底座启动失败: {str(e)}")
         finally:
-            # 清理临时文件
+            # webview关闭后清理临时文件
+            self._cleanup_js_base_temp_files()
+    
+    def _cleanup_js_base_temp_files(self):
+        """清理JS底座临时文件"""
+        if self.js_base_temp_dir and os.path.exists(self.js_base_temp_dir):
             try:
-                if 'temp_dir' in locals():
-                    shutil.rmtree(temp_dir)
-            except:
-                pass
+                shutil.rmtree(self.js_base_temp_dir)
+                self.js_base_temp_dir = None
+            except Exception as e:
+                self.log_message(f"清理临时文件失败: {str(e)}")
     
     def _create_js_base_html(self, remote_url, username, password, callback_method):
         """创建JS底座HTML页面"""
@@ -1450,7 +1680,18 @@ networks:
 <body>
     <div class="header">
         <h3>🌐 JS底座 - {remote_url}</h3>
-        <div id="status" class="status loading">正在加载...</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <button id="login-btn" onclick="manualLogin()" style="
+                background: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+            ">🔑 手动登录</button>
+            <div id="status" class="status loading">等待手动登录...</div>
+        </div>
     </div>
     
     <div id="loading" class="loading">
@@ -1504,6 +1745,11 @@ networks:
                     statusEl.className = 'status success';
                     loadingEl.style.display = 'none';
                     frameEl.style.display = 'block';
+                    
+                    // 重新启用登录按钮
+                    const loginBtn = document.getElementById('login-btn');
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = '🔄 重新登录';
                 }};
                 
                 frameEl.onerror = function() {{
@@ -1520,6 +1766,11 @@ networks:
                     <p>请检查回调方法实现和网络连接</p>
                     <p>如果没有实现getAuthToken方法，将尝试直接加载目标网站</p>
                 `;
+                
+                // 重新启用登录按钮
+                const loginBtn = document.getElementById('login-btn');
+                loginBtn.disabled = false;
+                loginBtn.textContent = '🔑 重试登录';
             }}
         }}
         
@@ -1534,8 +1785,24 @@ networks:
             return url.toString();
         }}
         
-        // 页面加载完成后初始化
-        document.addEventListener('DOMContentLoaded', initializeJSBase);
+        // 手动登录函数
+         function manualLogin() {{
+             console.log('=== 手动触发登录流程 ===');
+             console.log('提示：请查看控制台获取详细日志');
+             
+             const loginBtn = document.getElementById('login-btn');
+             loginBtn.disabled = true;
+             loginBtn.textContent = '登录中...';
+             
+             initializeJSBase();
+         }}
+         
+         // 页面加载完成后准备就绪
+         document.addEventListener('DOMContentLoaded', function() {{
+             console.log('=== JS底座页面已加载 ===');
+             console.log('提示：请点击顶部的"手动登录"按钮开始登录流程');
+             console.log('或者打开开发者工具控制台查看详细日志');
+         }});
     </script>
 </body>
 </html>
