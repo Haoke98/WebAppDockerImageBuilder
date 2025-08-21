@@ -29,6 +29,16 @@ except ImportError:
     GUI_AVAILABLE = False
     print("警告: 无法导入tkinter，GUI模式不可用")
 
+# 尝试导入webview库用于JS底座
+try:
+    import webview
+    import requests
+    WEBVIEW_AVAILABLE = True
+except ImportError:
+    WEBVIEW_AVAILABLE = False
+    print("警告: 无法导入webview或requests，JS底座功能不可用")
+    print("请运行: pip install pywebview requests")
+
 # 配置
 CONFIG = {
     'DOCKERHUB_USERNAME': os.getenv('DOCKERHUB_USERNAME', ''),
@@ -37,7 +47,12 @@ CONFIG = {
     'SERVICE_PREFIX': os.getenv('SERVICE_PREFIX', 'hzxy'),
     'BASE_IMAGE_NAME': 'hzxy-webapp-base',
     'BUILD_FOLDER': 'builds',
-    'CONFIG_FILE': os.path.expanduser('~/.hzxy-agent-config.json')
+    'CONFIG_FILE': os.path.expanduser('~/.hzxy-agent-config.json'),
+    # JS底座配置
+    'REMOTE_URL': '',
+    'REMOTE_USERNAME': '',
+    'REMOTE_PASSWORD': '',
+    'CALLBACK_METHOD': ''
 }
 
 # 确保构建目录存在
@@ -61,7 +76,11 @@ def save_config():
             'DOCKERHUB_TOKEN': CONFIG['DOCKERHUB_TOKEN'],
             'MAINTAINER': CONFIG['MAINTAINER'],
             'SERVICE_PREFIX': CONFIG['SERVICE_PREFIX'],
-            'BASE_IMAGE_NAME': CONFIG['BASE_IMAGE_NAME']
+            'BASE_IMAGE_NAME': CONFIG['BASE_IMAGE_NAME'],
+            'REMOTE_URL': CONFIG['REMOTE_URL'],
+            'REMOTE_USERNAME': CONFIG['REMOTE_USERNAME'],
+            'REMOTE_PASSWORD': CONFIG['REMOTE_PASSWORD'],
+            'CALLBACK_METHOD': CONFIG['CALLBACK_METHOD']
         }
         with open(CONFIG['CONFIG_FILE'], 'w', encoding='utf-8') as f:
             json.dump(config_to_save, f, indent=2, ensure_ascii=False)
@@ -377,7 +396,7 @@ class PublisherGUI:
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("WEB应用容器发布工具")
+        self.root.title("HZXY WEB应用容器发布工具")
         self.root.geometry("1000x800")
         self.root.resizable(True, True)
         
@@ -409,7 +428,7 @@ class PublisherGUI:
         main_frame.columnconfigure(1, weight=1)
         
         # 标题
-        title_label = ttk.Label(main_frame, text="🚀 WEB应用容器发布工具", font=('Arial', 16, 'bold'))
+        title_label = ttk.Label(main_frame, text="🚀 HZXY WEB应用容器发布工具", font=('Arial', 16, 'bold'))
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 20))
         
         # 左侧面板 - 配置和构建
@@ -451,9 +470,48 @@ class PublisherGUI:
         
         ttk.Button(config_frame, text="保存配置", command=self.save_settings).grid(row=0, column=2, rowspan=5)
         
+        # JS底座配置
+        js_base_frame = ttk.LabelFrame(left_panel, text="JS底座配置", padding="10")
+        js_base_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        js_base_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(js_base_frame, text="远程地址:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        self.remote_url_var = tk.StringVar()
+        remote_url_entry = ttk.Entry(js_base_frame, textvariable=self.remote_url_var)
+        remote_url_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        remote_url_entry.insert(0, "https://example.com")
+        
+        ttk.Label(js_base_frame, text="用户名:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+        self.remote_username_var = tk.StringVar()
+        remote_username_entry = ttk.Entry(js_base_frame, textvariable=self.remote_username_var)
+        remote_username_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        
+        ttk.Label(js_base_frame, text="密码:").grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+        self.remote_password_var = tk.StringVar()
+        remote_password_entry = ttk.Entry(js_base_frame, textvariable=self.remote_password_var, show="*")
+        remote_password_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        
+        ttk.Label(js_base_frame, text="回调方法:").grid(row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(5, 0))
+        self.callback_text = scrolledtext.ScrolledText(js_base_frame, height=6, width=50)
+        self.callback_text.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(5, 0))
+        # 默认回调方法模板
+        default_callback = """// 免登录回调方法
+// 返回格式: {token: 'your_token', success: true}
+function getAuthToken(username, password) {
+    // 在这里实现您的登录逻辑
+    // 例如: 调用API获取token
+    return {
+        token: 'example_token',
+        success: true
+    };
+}"""
+        self.callback_text.insert('1.0', default_callback)
+        
+        ttk.Button(js_base_frame, text="🌐 启动JS底座", command=self.start_js_base).grid(row=4, column=0, columnspan=2, pady=(10, 0))
+        
         # 新建构建
         build_frame = ttk.LabelFrame(left_panel, text="新建构建", padding="10")
-        build_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        build_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         build_frame.columnconfigure(1, weight=1)
         
         ttk.Label(build_frame, text="应用名称:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
@@ -473,7 +531,7 @@ class PublisherGUI:
         
         # 目录结构展示
         structure_frame = ttk.LabelFrame(left_panel, text="应用目录结构", padding="10")
-        structure_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        structure_frame.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         structure_frame.columnconfigure(0, weight=1)
         structure_frame.rowconfigure(0, weight=1)
         
@@ -487,7 +545,7 @@ class PublisherGUI:
         self.structure_tree.configure(yscrollcommand=structure_scrollbar.set)
         
         # 配置左侧面板权重
-        left_panel.rowconfigure(2, weight=1)
+        left_panel.rowconfigure(3, weight=1)
         
         # 右侧面板 - 构建列表和日志
         right_panel = ttk.Frame(main_frame)
@@ -683,6 +741,11 @@ class PublisherGUI:
         CONFIG['MAINTAINER'] = self.maintainer_var.get().strip()
         CONFIG['SERVICE_PREFIX'] = self.service_prefix_var.get().strip()
         CONFIG['BASE_IMAGE_NAME'] = self.base_image_name_var.get().strip()
+        # 保存JS底座配置
+        CONFIG['REMOTE_URL'] = self.remote_url_var.get().strip()
+        CONFIG['REMOTE_USERNAME'] = self.remote_username_var.get().strip()
+        CONFIG['REMOTE_PASSWORD'] = self.remote_password_var.get().strip()
+        CONFIG['CALLBACK_METHOD'] = self.callback_text.get('1.0', tk.END).strip()
         save_config()
         self.log_message("配置已保存")
         messagebox.showinfo("成功", "配置已保存")
@@ -711,6 +774,17 @@ class PublisherGUI:
             self.base_image_name_var.set(CONFIG['BASE_IMAGE_NAME'])
         else:
             self.base_image_name_var.set("hzxy-webapp-base")
+        
+        # 加载JS底座配置
+        if CONFIG.get('REMOTE_URL'):
+            self.remote_url_var.set(CONFIG['REMOTE_URL'])
+        if CONFIG.get('REMOTE_USERNAME'):
+            self.remote_username_var.set(CONFIG['REMOTE_USERNAME'])
+        if CONFIG.get('REMOTE_PASSWORD'):
+            self.remote_password_var.set(CONFIG['REMOTE_PASSWORD'])
+        if CONFIG.get('CALLBACK_METHOD'):
+            self.callback_text.delete('1.0', tk.END)
+            self.callback_text.insert('1.0', CONFIG['CALLBACK_METHOD'])
     
     def load_builds(self):
         """加载构建历史"""
@@ -1269,6 +1343,204 @@ networks:
                 return
         
         self.log_message("未找到匹配的构建记录")
+    
+    def start_js_base(self):
+        """启动JS底座"""
+        if not WEBVIEW_AVAILABLE:
+            messagebox.showerror("错误", "JS底座功能不可用，请安装依赖:\npip install pywebview requests")
+            return
+        
+        remote_url = self.remote_url_var.get().strip()
+        remote_username = self.remote_username_var.get().strip()
+        remote_password = self.remote_password_var.get().strip()
+        callback_method = self.callback_text.get('1.0', tk.END).strip()
+        
+        if not remote_url:
+            messagebox.showerror("错误", "请输入远程地址")
+            return
+        
+        if not callback_method:
+            messagebox.showerror("错误", "请输入回调方法")
+            return
+        
+        self.log_message("正在启动JS底座...")
+        
+        # 直接在主线程中启动JS底座
+        self._start_js_base_worker(remote_url, remote_username, remote_password, callback_method)
+    
+    def _start_js_base_worker(self, remote_url, username, password, callback_method):
+        """JS底座工作线程"""
+        try:
+            # 创建HTML页面
+            html_content = self._create_js_base_html(remote_url, username, password, callback_method)
+            
+            # 创建临时HTML文件
+            temp_dir = tempfile.mkdtemp()
+            html_file = os.path.join(temp_dir, 'js_base.html')
+            
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            self.log_message(f"JS底座已启动，正在加载: {remote_url}")
+            
+            # 启动webview（启用调试模式）
+            webview.create_window('JS底座 - 远程站点免登录', html_file, width=1200, height=800)
+            webview.start(debug=True)
+            
+        except Exception as e:
+            self.log_message(f"JS底座启动失败: {str(e)}")
+        finally:
+            # 清理临时文件
+            try:
+                if 'temp_dir' in locals():
+                    shutil.rmtree(temp_dir)
+            except:
+                pass
+    
+    def _create_js_base_html(self, remote_url, username, password, callback_method):
+        """创建JS底座HTML页面"""
+        html_template = f"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JS底座 - 远程站点免登录</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }}
+        .header {{
+            background: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .status {{
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+        }}
+        .status.loading {{
+            background: #f39c12;
+        }}
+        .status.success {{
+            background: #27ae60;
+        }}
+        .status.error {{
+            background: #e74c3c;
+        }}
+        #remote-frame {{
+            width: 100%;
+            height: calc(100vh - 60px);
+            border: none;
+        }}
+        .loading {{
+            text-align: center;
+            padding: 50px;
+            font-size: 18px;
+            color: #7f8c8d;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h3>🌐 JS底座 - {remote_url}</h3>
+        <div id="status" class="status loading">正在加载...</div>
+    </div>
+    
+    <div id="loading" class="loading">
+        <p>正在获取访问令牌并加载远程站点...</p>
+        <p>目标地址: {remote_url}</p>
+    </div>
+    
+    <iframe id="remote-frame" style="display: none;"></iframe>
+    
+    <script>
+        // 用户提供的回调方法
+        {callback_method}
+        
+        // 主要逻辑
+        async function initializeJSBase() {{
+            const statusEl = document.getElementById('status');
+            const loadingEl = document.getElementById('loading');
+            const frameEl = document.getElementById('remote-frame');
+            
+            try {{
+                // 检查是否有有效的回调方法
+                if (typeof getAuthToken === 'function') {{
+                    statusEl.textContent = '正在获取访问令牌...';
+                    statusEl.className = 'status loading';
+                    
+                    // 调用用户定义的回调方法获取token
+                    const authResult = await getAuthToken('{username}', '{password}');
+                    
+                    if (!authResult || !authResult.success) {{
+                        throw new Error('获取访问令牌失败: ' + (authResult?.message || '未知错误'));
+                    }}
+                    
+                    const token = authResult.token;
+                    console.log('获取到访问令牌:', token);
+                    
+                    statusEl.textContent = '正在加载远程站点...';
+                    
+                    // 构建带token的URL
+                    const targetUrl = buildAuthenticatedUrl('{remote_url}', token);
+                    frameEl.src = targetUrl;
+                }} else {{
+                    // 没有回调方法，直接加载目标网站（测试模式）
+                    console.log('未找到getAuthToken方法，直接加载目标网站');
+                    statusEl.textContent = '直接加载模式...';
+                    statusEl.className = 'status loading';
+                    frameEl.src = '{remote_url}';
+                }}
+                
+                frameEl.onload = function() {{
+                    statusEl.textContent = '加载完成';
+                    statusEl.className = 'status success';
+                    loadingEl.style.display = 'none';
+                    frameEl.style.display = 'block';
+                }};
+                
+                frameEl.onerror = function() {{
+                    throw new Error('远程站点加载失败');
+                }};
+                
+            }} catch (error) {{
+                console.error('JS底座初始化失败:', error);
+                statusEl.textContent = '加载失败: ' + error.message;
+                statusEl.className = 'status error';
+                loadingEl.innerHTML = `
+                    <p style="color: #e74c3c;">❌ 加载失败</p>
+                    <p>错误信息: ${{error.message}}</p>
+                    <p>请检查回调方法实现和网络连接</p>
+                    <p>如果没有实现getAuthToken方法，将尝试直接加载目标网站</p>
+                `;
+            }}
+        }}
+        
+        // 构建带认证信息的URL
+        function buildAuthenticatedUrl(baseUrl, token) {{
+            const url = new URL(baseUrl);
+            // 可以根据需要调整token的传递方式
+            // 方式1: 作为查询参数
+            url.searchParams.set('token', token);
+            // 方式2: 作为hash参数
+            // url.hash = 'token=' + token;
+            return url.toString();
+        }}
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', initializeJSBase);
+    </script>
+</body>
+</html>
+        """
+        return html_template
     
     def on_build_double_click(self, event):
         """构建双击事件处理 - 打开访问地址"""
