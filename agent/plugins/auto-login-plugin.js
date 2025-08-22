@@ -1,22 +1,26 @@
 /**
- * 自动登录插件 - 通用版本
+ * 自动登录插件 - 通用版本（改进版）
  * 根据配置自动调用后端登录接口并获取token
  * 支持多种认证方式和token存储策略
  */
 
 (function() {
     'use strict';
-    
-    // 插件配置 - 将在部署时动态替换
-    const CONFIG = {
-        LOGIN_URL: 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+
+    // 默认配置
+    let CONFIG = {
+        LOGIN_URL: 'https://example.com/api/chainAuthLogIn',
         REQUEST_METHOD: 'POST',
         CONTENT_TYPE: 'application/json',
-        REQUEST_PARAMS: 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+        REQUEST_PARAMS: 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
         TOKEN_PATH: 'data.token',
         USERNAME: '',
         PASSWORD: '',
-        DEBUG: true
+        DEBUG: true,
+        CONFIG_URL: '/sdm-plugins/config/auto-login-config.json', // 配置文件URL
+        SUCCESS_REDIRECT: '/industryInsight/cluster', // 默认成功跳转路径
+        TOKEN_VALIDATION_URL: "", // Token验证接口
+        TOKEN_VALIDATION_METHOD: 'GET' // Token验证方法
     };
 
     // 日志工具
@@ -105,6 +109,51 @@
         }
     }
 
+    // 获取外部配置文件
+    async function fetchConfig() {
+        try {
+            logger.log('正在获取配置文件:', CONFIG.CONFIG_URL);
+            const response = await fetch(CONFIG.CONFIG_URL);
+
+            if (!response.ok) {
+                throw new Error(`获取配置文件失败: HTTP ${response.status}`);
+            }
+
+            const externalConfig = await response.json();
+
+            // 合并配置（外部配置覆盖默认配置）
+            CONFIG = { ...CONFIG, ...externalConfig };
+
+            logger.log('配置文件加载成功:', CONFIG);
+            return true;
+        } catch (error) {
+            logger.error('获取配置文件失败，使用默认配置:', error);
+            return false;
+        }
+    }
+
+    // 验证token有效性
+    async function validateToken(token) {
+        if (!token) return false;
+        try {
+            logger.log('正在验证token有效性...');
+            const response = await fetch(CONFIG.TOKEN_VALIDATION_URL, {
+                method: CONFIG.TOKEN_VALIDATION_METHOD,
+                headers: {
+                    'Authorization': `${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const isValid = response.ok;
+            logger.log('Token验证结果:', isValid);
+            return isValid;
+        } catch (error) {
+            logger.error('Token验证失败:', error);
+            return false;
+        }
+    }
+
     // 主要登录函数
     async function performAutoLogin() {
         logger.log('开始自动登录流程...');
@@ -179,22 +228,42 @@
     }
 
     // 检查是否需要登录
-    function shouldPerformLogin() {
+    async function shouldPerformLogin() {
         // 检查是否已有有效token
         const existingToken = localStorage.getItem('token') ||
                             localStorage.getItem('access_token') ||
                             localStorage.getItem('authToken');
-
-        if (existingToken) {
-            logger.log('检测到现有token，跳过自动登录');
-            return false;
-        }
 
         // 检查是否在登录页面
         const isLoginPage = window.location.pathname.includes('/login') ||
                           window.location.pathname.includes('login') ||
                           window.location.hash.includes('login');
 
+        if (existingToken) {
+            logger.log('检测到现有token，验证有效性...');
+            const isValid = await validateToken(existingToken);
+
+            if (isValid) {
+                logger.log('Token有效');
+
+                // 如果token有效但在登录页面，则跳转到目标页面
+                if (isLoginPage) {
+                    logger.log('Token有效但处于登录页面，执行跳转');
+                    handleSuccessfulLogin();
+                }
+
+                return false;
+            } else {
+                logger.log('Token已失效，需要重新登录');
+                // 清除无效token
+                localStorage.removeItem('token');
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('authToken');
+                return true;
+            }
+        }
+
+        // 如果没有token，检查是否在登录页面
         if (isLoginPage) {
             logger.log('当前在登录页面，执行自动登录');
             return true;
@@ -217,28 +286,30 @@
 
     // 页面导航处理
     function handleSuccessfulLogin() {
-        // 如果当前在登录页面，尝试导航到主页
+        // 获取配置的跳转路径
+        const redirectPath = CONFIG.SUCCESS_REDIRECT || '/industryInsight/cluster';
+
+        // 如果当前在登录页面，尝试导航到目标页面
         if (window.location.pathname.includes('/login') ||
             window.location.pathname.includes('login') ||
             window.location.hash.includes('login')) {
 
-            const possibleRoutes = ['/industryInsight/cluster'];
-
-            for (let route of possibleRoutes) {
-                try {
-                    if (window.location.hash) {
-                        // SPA hash路由
-                        window.location.hash = route;
-                        logger.log(`导航到: ${route} (hash模式)`);
-                    } else {
-                        // 传统路由
-                        window.location.href = route;
-                        logger.log(`导航到: ${route}`);
-                    }
-                    break;
-                } catch (e) {
-                    continue;
+            try {
+                if (window.location.hash) {
+                    // SPA hash路由
+                    window.location.hash = redirectPath;
+                    logger.log(`导航到: ${redirectPath} (hash模式)`);
+                } else {
+                    // 传统路由
+                    window.location.href = redirectPath;
+                    logger.log(`导航到: ${redirectPath}`);
                 }
+            } catch (e) {
+                logger.error('导航失败:', e);
+                // 刷新当前页面作为备选方案
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
             }
         } else {
             // 刷新当前页面以应用新的认证状态
@@ -247,11 +318,14 @@
             }, 1000);
         }
     }
-    
+
     // 初始化插件
-    function initPlugin() {
+    async function initPlugin() {
         logger.log('🚀 自动登录插件初始化...');
-        
+
+        // 获取外部配置
+        await fetchConfig();
+
         // 等待DOM加载完成
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', startAutoLogin);
@@ -259,29 +333,33 @@
             startAutoLogin();
         }
     }
-    
+
     // 开始自动登录流程
     async function startAutoLogin() {
-        if (!shouldPerformLogin()) {
+        const shouldLogin = await shouldPerformLogin();
+
+        if (!shouldLogin) {
             return;
         }
-        
+
         // 延迟执行，确保页面完全加载
         setTimeout(async () => {
             const result = await performAutoLogin();
-            
+
             if (result.success) {
                 // 延迟导航，给应用时间处理认证状态
                 setTimeout(handleSuccessfulLogin, 1500);
             }
         }, 1000);
     }
-    
+
     // 暴露全局API
     window.AutoLoginPlugin = {
         login: performAutoLogin,
         setToken: setTokenToStorage,
-        getConfig: () => ({ ...CONFIG, PASSWORD: '***' }) // 隐藏密码
+        validateToken: validateToken,
+        getConfig: () => ({ ...CONFIG, PASSWORD: '***' }), // 隐藏密码
+        reloadConfig: fetchConfig
     };
     
     // 启动插件
