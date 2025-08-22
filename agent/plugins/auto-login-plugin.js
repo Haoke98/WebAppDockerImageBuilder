@@ -14,8 +14,6 @@
         CONTENT_TYPE: 'application/json',
         REQUEST_PARAMS: 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
         TOKEN_PATH: 'data.token',
-        USERNAME: '',
-        PASSWORD: '',
         DEBUG: true,
         CONFIG_URL: '/sdm-plugins/config/auto-login-config.json', // 配置文件URL
         SUCCESS_REDIRECT: '/industryInsight/cluster', // 默认成功跳转路径
