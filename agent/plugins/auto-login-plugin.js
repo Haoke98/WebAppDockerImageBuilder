@@ -19,6 +19,7 @@
         DEBUG: true,
         CONFIG_URL: '/sdm-plugins/config/auto-login-config.json', // 配置文件URL
         SUCCESS_REDIRECT: '/industryInsight/cluster', // 默认成功跳转路径
+        TOKEN_KEY:"token",
         TOKEN_VALIDATION_URL: "", // Token验证接口
         TOKEN_VALIDATION_METHOD: 'GET' // Token验证方法
     };
@@ -230,14 +231,14 @@
     // 检查是否需要登录
     async function shouldPerformLogin() {
         // 检查是否已有有效token
-        const existingToken = localStorage.getItem('token') ||
-                            localStorage.getItem('access_token') ||
-                            localStorage.getItem('authToken');
+        const tokenKey = CONFIG.TOKEN_KEY || 'access_token';
+        const existingToken = localStorage.getItem(tokenKey)
 
         // 检查是否在登录页面
         const isLoginPage = window.location.pathname.includes('/login') ||
                           window.location.pathname.includes('login') ||
                           window.location.hash.includes('login');
+        console.log("当前是否处在登录页：",isLoginPage,"WindowLocation:",window.location)
 
         if (existingToken) {
             logger.log('检测到现有token，验证有效性...');
@@ -250,6 +251,8 @@
                 if (isLoginPage) {
                     logger.log('Token有效但处于登录页面，执行跳转');
                     handleSuccessfulLogin();
+                }else {
+                    logger.log('当前在['+window.location.pathname+'], 不在登录页面!');
                 }
 
                 return false;
@@ -267,6 +270,8 @@
         if (isLoginPage) {
             logger.log('当前在登录页面，执行自动登录');
             return true;
+        }else {
+            logger.log('当前在['+window.location.pathname+'], 不在登录页面!');
         }
 
         // 检查页面是否需要认证（通过常见的未认证标识）
@@ -293,17 +298,10 @@
         if (window.location.pathname.includes('/login') ||
             window.location.pathname.includes('login') ||
             window.location.hash.includes('login')) {
-
             try {
-                if (window.location.hash) {
-                    // SPA hash路由
-                    window.location.hash = redirectPath;
-                    logger.log(`导航到: ${redirectPath} (hash模式)`);
-                } else {
-                    // 传统路由
-                    window.location.href = redirectPath;
-                    logger.log(`导航到: ${redirectPath}`);
-                }
+                // 传统路由
+                window.location.href = redirectPath;
+                logger.log(`导航到: ${redirectPath}`);
             } catch (e) {
                 logger.error('导航失败:', e);
                 // 刷新当前页面作为备选方案
@@ -364,6 +362,12 @@
     
     // 启动插件
     initPlugin();
+    // 立即开始执行，然后每隔5秒执行一次
+    const intervalId = setInterval(() => {
+        startAutoLogin();
+    }, 3000); // 5000毫秒 = 5秒
+    // 如果需要停止定时器
+    // clearInterval(intervalId);
     
     logger.log('自动登录插件已加载');
     

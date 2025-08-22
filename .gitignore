@@ -3,3 +3,4 @@
 *.pyc
 __pychache__/
 /agent/plugins/auto-login-config.json
+/agent/plugins/config/auto-login-config.json

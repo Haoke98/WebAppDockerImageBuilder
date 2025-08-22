@@ -130,13 +130,20 @@ def handle_static_request(path):
     if not os.path.abspath(file_path).startswith(os.path.abspath(static_path)):
         abort(403, "访问被拒绝")
     
+    # 检查文件是否存在
     if not os.path.exists(file_path):
-        # 如果文件不存在，尝试查找 index.html
-        index_path = os.path.join(static_path, 'index.html')
-        if os.path.exists(index_path):
-            file_path = index_path
-        else:
+        # 判断是否为静态资源文件（有明确的文件扩展名）
+        _, ext = os.path.splitext(path)
+        if ext and ext.lower() in ['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.map', '.json']:
+            # 静态资源文件不存在时直接返回404
             abort(404, "文件不存在")
+        else:
+            # 对于页面路由（无扩展名或html扩展名），回退到 index.html
+            index_path = os.path.join(static_path, 'index.html')
+            if os.path.exists(index_path):
+                file_path = index_path
+            else:
+                abort(404, "文件不存在")
     
     # 如果是 index.html 文件，进行插件注入
     if os.path.basename(file_path).lower() == 'index.html':
